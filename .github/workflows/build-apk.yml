@@ -16,15 +16,14 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Configurar JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      # No dependemos del gradle wrapper (gradlew) para evitar problemas si el
-      # binario no está versionado; esta acción provisiona Gradle directamente.
+      # Se actualiza a setup-gradle@v4.3.0 para soporte completo de Node 24
       - name: Instalar Gradle 8.7
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v4.3.0
         with:
           gradle-version: '8.7'
 
