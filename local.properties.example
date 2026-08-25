@@ -1,0 +1,10 @@
+# Copia este archivo como "local.properties" (en la raíz del proyecto) y
+# NUNCA lo subas a un repositorio público (ya debería estar en .gitignore).
+
+# Ruta a tu Android SDK (Android Studio la completa automáticamente al abrir el proyecto)
+sdk.dir=/ruta/a/tu/Android/Sdk
+
+# --- Conector de IA de reconocimiento de sellos (Gemini, capa GRATUITA) ---
+# Consigue tu clave gratis (sin tarjeta) en https://aistudio.google.com/apikey
+AI_API_KEY=tu_api_key_de_gemini_aqui
+AI_API_BASE_URL=https://generativelanguage.googleapis.com/
