@@ -1,0 +1,50 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Configurar JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # No dependemos del gradle wrapper (gradlew) para evitar problemas si el
+      # binario no está versionado; esta acción provisiona Gradle directamente.
+      - name: Instalar Gradle 8.7
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Instalar plataformas y build-tools de Android
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platforms;android-34" "build-tools;34.0.0" > /dev/null
+
+      - name: Crear local.properties
+        run: |
+          echo "sdk.dir=${ANDROID_HOME}" > local.properties
+          echo "AI_API_KEY=${{ secrets.AI_API_KEY }}" >> local.properties
+          echo "AI_API_BASE_URL=${{ secrets.AI_API_BASE_URL || 'https://generativelanguage.googleapis.com/' }}" >> local.properties
+
+      - name: Compilar APK debug
+        run: gradle assembleDebug --no-daemon
+
+      - name: Subir APK como artefacto descargable
+        uses: actions/upload-artifact@v4
+        with:
+          name: stamp-scanner-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30
