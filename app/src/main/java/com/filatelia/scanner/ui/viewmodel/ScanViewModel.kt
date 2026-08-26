@@ -16,6 +16,7 @@ import com.filatelia.scanner.imageprocessing.PerceptualHash
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
@@ -43,9 +44,9 @@ data class ScanUiState(
 class ScanViewModel(
     private val stampRepository: StampRepository,
     private val aiRepository: AiRecognitionRepository,
-    private val duplicateDetector: DuplicateDetector,
-    private val imagePreprocessor: ImagePreprocessor,
-    private val perceptualHash: PerceptualHash
+    private val duplicateDetector: DuplicateDetector = DuplicateDetector(),
+    private val imagePreprocessor: ImagePreprocessor = ImagePreprocessor(),
+    private val perceptualHash: PerceptualHash = PerceptualHash()
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ScanUiState())
@@ -56,14 +57,14 @@ class ScanViewModel(
             _uiState.update { it.copy(step = ScanStep.Preprocessing, rawImageFile = file) }
 
             val prepResult = imagePreprocessor.preprocess(file)
-            if (!prepResult.isSuccess || prepResult.outputFile == null) {
+            if (prepResult.file == null) {
                 _uiState.update {
-                    it.copy(step = ScanStep.Error("Error al procesar la imagen capturada."))
+                    it.copy(step = ScanStep.Error(prepResult.errorMessage ?: "Error al procesar la imagen."))
                 }
                 return@launch
             }
 
-            val processedFile = prepResult.outputFile
+            val processedFile = prepResult.file
             val bitmap = BitmapFactory.decodeFile(processedFile.absolutePath)
             val hash = perceptualHash.compute(bitmap)
 
@@ -76,13 +77,29 @@ class ScanViewModel(
                 )
             }
 
-            // Comprobación de duplicados en la colección
-            val existingStamps = stampRepository.getAllSync()
+            // Consultar colección actual de sellos
+            val existingStamps = try {
+                stampRepository.getAllStamps().first()
+            } catch (_: Exception) {
+                emptyList()
+            }
+
+            val candidateEntity = StampEntity(
+                imagePath = processedFile.absolutePath,
+                perceptualHash = hash,
+                country = "",
+                era = "",
+                faceValue = "",
+                series = "",
+                condition = "",
+                rarity = "",
+                motif = "",
+                historicalNote = ""
+            )
+
             val duplicateResult = duplicateDetector.check(
-                candidateHash = hash,
-                candidateCountry = null,
-                candidateFaceValue = null,
-                existing = existingStamps
+                candidate = candidateEntity,
+                collection = existingStamps
             )
 
             if (duplicateResult.isDuplicate) {
