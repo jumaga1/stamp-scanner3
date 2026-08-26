@@ -9,9 +9,9 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.logging.HttpLoggingInterceptor
-import retrofit2.Retrofit
-import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -28,24 +28,15 @@ class AiRecognitionRepository(
             else -> "AQ.Ab8RN6KqD2wgAw69n4UdJks6mqCpCi_bXLvCHlZT7aONEI19xQ"
         }
 
-    private val service: AiRecognitionService by lazy {
+    private val httpClient: OkHttpClient by lazy {
         val logging = HttpLoggingInterceptor().apply {
             level = HttpLoggingInterceptor.Level.BODY
         }
-        val client = OkHttpClient.Builder()
+        OkHttpClient.Builder()
             .addInterceptor(logging)
             .connectTimeout(45, TimeUnit.SECONDS)
             .readTimeout(45, TimeUnit.SECONDS)
             .build()
-
-        val contentType = "application/json".toMediaType()
-
-        Retrofit.Builder()
-            .baseUrl("https://generativelanguage.googleapis.com/")
-            .client(client)
-            .addConverterFactory(json.asConverterFactory(contentType))
-            .build()
-            .create(AiRecognitionService::class.java)
     }
 
     suspend fun recognize(imageFile: File): AiRecognitionOutcome = withContext(Dispatchers.IO) {
@@ -63,27 +54,27 @@ class AiRecognitionRepository(
             val base64Image = Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
 
             val prompt = """
-                Eres un experto mundial en filatelia. Analiza minuciosamente este sello postal (ej: Deutsche Bundespost, RDA, PFA, Alemania, etc.).
+                Eres un experto mundial en filatelia. Analiza minuciosamente este sello postal (ej: Deutsche Bundespost, Berlín, RDA, PFA, Alemania, etc.).
                 Extrae con precisión:
-                1. country: País o entidad emisora oficial (ej. "Alemania", "Alemania (Berlín Oeste)", "RDA", "México").
+                1. country: País o entidad emisora oficial (ej. "Alemania (Deutsche Bundespost)", "Alemania (Berlín)", "RDA", "México").
                 2. era: Época estimada (ej. "1970-1979", "República Federal").
-                3. issueYearEstimate: Año de emisión estimado (número entero, ej. 1978).
-                4. faceValue: Valor facial completo y moneda (ej. "80 Pf", "50 Céntimos").
-                5. series: Serie o emisión temática si aplica (ej. "Para el bienestar público - Carruajes").
+                3. issueYearEstimate: Año de emisión estimado (número entero, ej. 1971).
+                4. faceValue: Valor facial completo y moneda (ej. "40 Pf", "80 Pf").
+                5. series: Serie o emisión temática si aplica (ej. "Personajes ilustres", "Para el bienestar público").
                 6. condition: Estado aparente ("Usado / Matasellado", "Nuevo con goma").
                 7. rarity: Rareza ("Común", "Escaso", "Raro").
                 8. motif: Motivo o personaje que ilustra.
-                9. historicalNote: Breve resumen histórico del sello.
-                10. catalogMichelNumber: Referencia estimada de catálogo Michel (ej. "MiNr. 580").
+                9. historicalNote: Breve contexto histórico.
+                10. catalogMichelNumber: Referencia estimada de catálogo Michel (ej. "MiNr. 614").
                 11. catalogScottNumber: Referencia Scott estimada.
                 12. catalogYvertNumber: Referencia Yvert estimada.
-                13. confidence: Número flotante de 0.0 a 1.0 indicando certeza.
+                13. confidence: Grado de certeza de 0.0 a 1.0.
 
                 Devuelve EXCLUSIVAMENTE este JSON:
                 {
                   "country": "...",
                   "era": "...",
-                  "issueYearEstimate": 1978,
+                  "issueYearEstimate": 1971,
                   "faceValue": "...",
                   "series": "...",
                   "condition": "...",
@@ -97,7 +88,7 @@ class AiRecognitionRepository(
                 }
             """.trimIndent()
 
-            val request = GeminiRequest(
+            val requestPayload = GeminiRequest(
                 contents = listOf(
                     GeminiContent(
                         parts = listOf(
@@ -109,22 +100,43 @@ class AiRecognitionRepository(
                 generationConfig = GenerationConfig("application/json")
             )
 
-            val fullUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
-            val response = service.generateContent(fullUrl, key, request)
+            val jsonBody = json.encodeToString(GeminiRequest.serializer(), requestPayload)
+            val mediaType = "application/json; charset=utf-8".toMediaType()
 
-            if (response.code() == 429) {
-                return@withContext AiRecognitionOutcome.RateLimited
+            // Lista de endpoints candidatos compatibles para garantizar respuesta 200
+            val candidateUrls = listOf(
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=$key",
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro-vision:generateContent?key=$key",
+                "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=$key"
+            )
+
+            var lastError = ""
+            for (url in candidateUrls) {
+                val httpRequest = Request.Builder()
+                    .url(url)
+                    .addHeader("x-goog-api-key", key)
+                    .post(jsonBody.toRequestBody(mediaType))
+                    .build()
+
+                val response = httpClient.newCall(httpRequest).execute()
+                val responseBody = response.body?.string().orEmpty()
+
+                if (response.isSuccessful && responseBody.isNotBlank()) {
+                    val geminiRes = json.decodeFromString(GeminiResponse.serializer(), responseBody)
+                    val rawText = geminiRes.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                    if (!rawText.isNullOrBlank()) {
+                        val cleaned = rawText.replace("```json", "").replace("```", "").trim()
+                        val parsed = json.decodeFromString(StampRecognitionResult.serializer(), cleaned)
+                        return@withContext AiRecognitionOutcome.Success(parsed)
+                    }
+                } else if (response.code == 429) {
+                    return@withContext AiRecognitionOutcome.RateLimited
+                } else {
+                    lastError = "HTTP ${response.code}: $responseBody"
+                }
             }
-            if (!response.isSuccessful) {
-                return@withContext AiRecognitionOutcome.Error("Error HTTP ${response.code()}: ${response.errorBody()?.string() ?: response.message()}")
-            }
 
-            val rawJson = response.body()?.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
-                ?: return@withContext AiRecognitionOutcome.Error("Respuesta vacía de la IA")
-
-            val cleanedJson = rawJson.replace("```json", "").replace("```", "").trim()
-            val parsed = json.decodeFromString<StampRecognitionResult>(cleanedJson)
-            AiRecognitionOutcome.Success(parsed)
+            AiRecognitionOutcome.Error("No se pudo identificar con los modelos disponibles: $lastError")
         } catch (e: Exception) {
             AiRecognitionOutcome.Error(e.message ?: "Error desconocido al procesar con IA")
         }
