@@ -47,10 +47,9 @@ class AiRecognitionRepository(
             }
 
             val bitmap = BitmapFactory.decodeFile(imageFile.absolutePath)
-                ?: return@withContext AiRecognitionOutcome.Error("No se pudo cargar la imagen del sello")
+                ?: return@withContext AiRecognitionOutcome.Error("No se pudo cargar la imagen")
 
             val outputStream = ByteArrayOutputStream()
-            // Ajuste óptimo de resolución para máxima nitidez en los textos del sello
             val maxDimension = 1200
             val scale = if (bitmap.width > maxDimension || bitmap.height > maxDimension) {
                 val ratio = maxDimension.toFloat() / maxOf(bitmap.width, bitmap.height)
@@ -62,25 +61,25 @@ class AiRecognitionRepository(
             val base64Image = Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
 
             val prompt = """
-                Eres un experto mundial y tasador en filatelia. Analiza minuciosamente el sello postal visible en la fotografía (lee todos los textos impresos en el sello, facial, matasellos e ilustraciones).
+                Eres un experto mundial en filatelia. Analiza el sello postal adjunto.
+                Además de identificar sus datos, proporciona una URL pública directa y nítida de la imagen oficial de este sello en Wikimedia Commons o catálogo filatélico abierto en el campo "referenceImageUrl".
                 
-                IMPORTANTE: Si la imagen contiene anotaciones escritas (ej. hojas clasificadoras con año o país), úsalas como confirmación pero prioriza lo impreso en el sello.
-                
-                Devuelve EXCLUSIVAMENTE este formato JSON:
+                Devuelve EXCLUSIVAMENTE este JSON:
                 {
-                  "country": "País o entidad emisora oficial (ej. Alemania (RFA), Alemania (RDA), Deutsche Bundespost)",
-                  "era": "Periodo o época histórica (ej. 1970-1979)",
+                  "country": "...",
+                  "era": "...",
                   "issueYearEstimate": 1970,
-                  "faceValue": "Valor facial exacto con moneda (ej. 50 Pf, 40 Pf)",
-                  "series": "Serie o tipo de emisión (ej. Serie básica Presidentes Federales)",
-                  "condition": "Estado aparente (Usado / Matasellado, Nuevo)",
-                  "rarity": "Nivel de rareza (Común, Escaso, Raro)",
-                  "motif": "Descripción del diseño (ej. Retrato de Gustav Heinemann)",
-                  "historicalNote": "Breve contexto histórico del sello",
-                  "estimatedMarketValue": "Valor comercial estimado (ej. $0.50 - $1.50 USD)",
-                  "catalogMichelNumber": "Número en catálogo Michel si es identificable (ej. MiNr. 638)",
-                  "catalogScottNumber": "Número en catálogo Scott",
-                  "catalogYvertNumber": "Número en catálogo Yvert",
+                  "faceValue": "...",
+                  "series": "...",
+                  "condition": "...",
+                  "rarity": "...",
+                  "motif": "...",
+                  "historicalNote": "...",
+                  "estimatedMarketValue": "$0.50 - $1.50 USD",
+                  "referenceImageUrl": "https://upload.wikimedia.org/... (URL directa o null)",
+                  "catalogMichelNumber": "...",
+                  "catalogScottNumber": "...",
+                  "catalogYvertNumber": "...",
                   "confidence": 0.95
                 }
             """.trimIndent()
@@ -105,14 +104,7 @@ class AiRecognitionRepository(
             }.toString()
 
             val mediaType = "application/json; charset=utf-8".toMediaType()
-
-            // Lista de modelos oficiales
-            val models = listOf(
-                "gemini-2.0-flash",
-                "gemini-1.5-flash",
-                "gemini-1.5-flash-8b",
-                "gemini-1.5-pro"
-            )
+            val models = listOf("gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-1.5-pro")
 
             var lastError = ""
 
@@ -144,18 +136,18 @@ class AiRecognitionRepository(
                             return@withContext AiRecognitionOutcome.Success(stamp)
                         }
                     } else if (response.code == 429) {
-                        lastError = "Límite de consultas temporal (429) en $model"
+                        lastError = "Límite 429 en $model"
                     } else {
                         lastError = "HTTP ${response.code}: $bodyStr"
                     }
                 } catch (e: Exception) {
-                    lastError = e.message ?: "Error de conexión"
+                    lastError = e.message ?: "Error de red"
                 }
             }
 
-            AiRecognitionOutcome.Error("La IA no pudo procesar la imagen: $lastError")
+            AiRecognitionOutcome.Error("Detalle: $lastError")
         } catch (e: Exception) {
-            AiRecognitionOutcome.Error(e.message ?: "Error al procesar la imagen")
+            AiRecognitionOutcome.Error(e.message ?: "Error general")
         }
     }
 }
