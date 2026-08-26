@@ -7,40 +7,46 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
-val BrandNavy = Color(0xFF0F1E36)
-val BrandGold = Color(0xFFD4AF37)
-val BrandGoldLight = Color(0xFFFFF8E7)
-val AccentTeal = Color(0xFF1B6B93)
-val CardBackground = Color(0xFFFFFFFF)
-val PageBackground = Color(0xFFF4F6F9)
+// Paleta Plateada / Titanio Metálico
+val SilverDarkNavy = Color(0xFF1E2836)
+val SilverMetallic = Color(0xFFC0C7CE)
+val SilverLight = Color(0xFFECEFF2)
+val SilverBackground = Color(0xFFE2E6EA)
+val SilverSurface = Color(0xFFF5F7FA)
+val SilverCardBorder = Color(0xFFB8C2CC)
+val SilverAccentTeal = Color(0xFF2B4C6F)
+val ValuationGold = Color(0xFFC59B27)
+val ValuationGoldContainer = Color(0xFFFFF9E6)
 
 val LightColors = lightColorScheme(
-    primary = BrandNavy,
+    primary = SilverDarkNavy,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFE2EAF4),
-    onPrimaryContainer = BrandNavy,
-    secondary = AccentTeal,
+    primaryContainer = Color(0xFFDCE2E8),
+    onPrimaryContainer = SilverDarkNavy,
+    secondary = SilverAccentTeal,
     onSecondary = Color.White,
-    secondaryContainer = Color(0xFFD2E9F7),
-    onSecondaryContainer = Color(0xFF003554),
-    tertiary = BrandGold,
-    onTertiary = Color(0xFF3E2D00),
-    tertiaryContainer = BrandGoldLight,
-    onTertiaryContainer = Color(0xFF4C3600),
-    background = PageBackground,
-    surface = CardBackground,
-    surfaceVariant = Color(0xFFEAEEF3),
-    onSurfaceVariant = Color(0xFF454B54)
+    secondaryContainer = Color(0xFFD0DCE8),
+    onSecondaryContainer = Color(0xFF112233),
+    tertiary = ValuationGold,
+    onTertiary = Color(0xFF3B2E00),
+    tertiaryContainer = ValuationGoldContainer,
+    onTertiaryContainer = Color(0xFF4D3800),
+    background = SilverBackground,
+    surface = SilverSurface,
+    surfaceVariant = Color(0xFFD8DEE4),
+    onSurfaceVariant = Color(0xFF454F5B),
+    outline = SilverCardBorder
 )
 
 val DarkColors = darkColorScheme(
-    primary = Color(0xFF90B5E8),
-    onPrimary = Color(0xFF0F1E36),
-    secondary = Color(0xFF67B5E8),
-    tertiary = BrandGold,
-    background = Color(0xFF10141D),
-    surface = Color(0xFF171D28),
-    surfaceVariant = Color(0xFF222B3A)
+    primary = Color(0xFFB0BAC5),
+    onPrimary = Color(0xFF111822),
+    secondary = Color(0xFF8FA9C4),
+    tertiary = ValuationGold,
+    background = Color(0xFF181E26),
+    surface = Color(0xFF222B36),
+    surfaceVariant = Color(0xFF2E3845),
+    outline = Color(0xFF4A5568)
 )
 
 @Composable
