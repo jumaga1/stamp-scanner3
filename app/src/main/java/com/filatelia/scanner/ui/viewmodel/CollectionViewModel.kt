@@ -5,38 +5,40 @@ import androidx.lifecycle.viewModelScope
 import com.filatelia.scanner.data.SortOrder
 import com.filatelia.scanner.data.StampEntity
 import com.filatelia.scanner.data.StampRepository
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
-class CollectionViewModel(private val repository: StampRepository) : ViewModel() {
-
-    private val _sortOrder = MutableStateFlow(SortOrder.RECIENTES)
-    val sortOrder: StateFlow<SortOrder> = _sortOrder
+class CollectionViewModel(
+    private val stampRepository: StampRepository
+) : ViewModel() {
 
     private val _searchQuery = MutableStateFlow("")
-    val searchQuery: StateFlow<String> = _searchQuery
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
-    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-    val stamps: StateFlow<List<StampEntity>> = combine(_sortOrder, _searchQuery) { order, query -> order to query }
-        .flatMapLatest { (order, query) ->
-            if (query.isBlank()) repository.observeStamps(order) else repository.search(query)
-        }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    private val _sortOrder = MutableStateFlow(SortOrder.RECENT)
+    val sortOrder: StateFlow<SortOrder> = _sortOrder.asStateFlow()
 
-    fun setSortOrder(order: SortOrder) {
-        _sortOrder.value = order
+    val stamps: StateFlow<List<StampEntity>> = combine(_searchQuery, _sortOrder) { query, sort ->
+        Pair(query, sort)
+    }.flatMapLatest { (query, sort) ->
+        stampRepository.observeStamps(query, sort)
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
+
+    fun onSearchQueryChanged(newQuery: String) {
+        _searchQuery.value = newQuery
     }
 
-    fun setSearchQuery(query: String) {
-        _searchQuery.value = query
+    fun onSortOrderChanged(newOrder: SortOrder) {
+        _sortOrder.value = newOrder
     }
 
     fun deleteStamp(stamp: StampEntity) {
-        viewModelScope.launch { repository.deleteStamp(stamp) }
+        viewModelScope.launch {
+            stampRepository.delete(stamp)
+        }
     }
 }
