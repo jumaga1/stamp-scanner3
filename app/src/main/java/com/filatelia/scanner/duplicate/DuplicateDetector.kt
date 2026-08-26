@@ -9,20 +9,22 @@ enum class DuplicateConfidence {
     CASI_SEGURO
 }
 
-data class DuplicateCheckResult(
+data class DuplicateResult(
     val confidence: DuplicateConfidence,
     val matchedStamp: StampEntity? = null,
     val message: String = ""
 )
 
+// Alias para compatibilidad
+typealias DuplicateCheckResult = DuplicateResult
+
 object DuplicateDetector {
-    fun check(candidate: StampEntity, collection: List<StampEntity>): DuplicateCheckResult {
+    fun check(candidate: StampEntity, collection: List<StampEntity>): DuplicateResult {
         if (collection.isEmpty()) {
-            return DuplicateCheckResult(DuplicateConfidence.NINGUNO)
+            return DuplicateResult(DuplicateConfidence.NINGUNO)
         }
 
         for (existing in collection) {
-            // Coincidencia por catálogo o hash perceptual
             val sameCat = !candidate.catalogMichelNumber.isNullOrBlank() &&
                     candidate.catalogMichelNumber.equals(existing.catalogMichelNumber, ignoreCase = true)
             val sameScott = !candidate.catalogScottNumber.isNullOrBlank() &&
@@ -32,13 +34,17 @@ object DuplicateDetector {
                     candidate.faceValue?.equals(existing.faceValue, ignoreCase = true) == true
 
             if (sameCat || sameScott) {
-                return DuplicateCheckResult(DuplicateConfidence.CASI_SEGURO, existing, "Coincidencia exacta de catálogo.")
+                return DuplicateResult(DuplicateConfidence.CASI_SEGURO, existing, "Coincidencia exacta de catálogo.")
             }
             if (sameCountryYearFace) {
-                return DuplicateCheckResult(DuplicateConfidence.PROBABLE, existing, "Coincidencia de país, año y valor facial.")
+                return DuplicateResult(DuplicateConfidence.PROBABLE, existing, "Coincidencia de país, año y valor facial.")
             }
         }
 
-        return DuplicateCheckResult(DuplicateConfidence.NINGUNO)
+        return DuplicateResult(DuplicateConfidence.NINGUNO)
+    }
+
+    fun findDuplicate(candidate: StampEntity, collection: List<StampEntity>): DuplicateResult {
+        return check(candidate, collection)
     }
 }
