@@ -5,11 +5,7 @@ on:
     branches:
       - main
       - master
-  pull_request:
-    branches:
-      - main
-      - master
-  workflow_dispatch: # Permite ejecutar la compilación manualmente con un clic
+  workflow_dispatch:
 
 jobs:
   build:
@@ -17,30 +13,28 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Descargar el código del repositorio
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 2. Configurar Java JDK 17 (Estándar para Android Gradle Plugin moderno)
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: gradle
 
-      # 3. Dar permisos de ejecución al ejecutable de Gradle (Evita errores de permisos en Linux)
-      - name: Grant Execute Permission to Gradle Wrapper
-        run: chmod +x gradlew
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.7'
 
-      # 4. Compilar el APK en modo Debug con optimización de memoria
-      - name: Assemble Debug APK
-        run: ./gradlew assembleDebug --no-daemon --stacktrace -Dorg.gradle.jvmargs="-Xmx3072m -XX:MaxMetaspaceSize=1024m"
+      - name: Build with Gradle in Subdirectory
+        # Reemplaza 'stamp-scanner3' por el nombre exacto de la subcarpeta si aplica
+        working-directory: ./stamp-scanner3
+        run: gradle assembleDebug --no-daemon --stacktrace
 
-      # 5. Subir el archivo APK generado a los Artifacts de GitHub Actions
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: StampScanner-Debug-APK
-          path: app/build/outputs/apk/debug/*.apk
+          path: "**/app/build/outputs/apk/debug/*.apk"
           retention-days: 14
