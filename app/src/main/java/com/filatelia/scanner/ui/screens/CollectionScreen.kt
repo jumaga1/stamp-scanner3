@@ -1,9 +1,5 @@
 package com.filatelia.scanner.ui.screens
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -35,15 +31,14 @@ import java.io.File
 @Composable
 fun CollectionScreen(
     viewModel: CollectionViewModel,
-    onStampClick: (Long) -> Unit
+    onStampClick: (StampEntity) -> Unit
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val stamps by viewModel.stamps.collectAsState()
     var selectedCountry by remember { mutableStateOf<String?>(null) }
     var searchQuery by remember { mutableStateOf("") }
 
-    val stamps = uiState.stamps
     val groupedByCountry = remember(stamps) {
-        stamps.groupBy { it.country.ifBlank { "Sin País Asignado" } }
+        stamps.groupBy { it.country?.ifBlank { "Sin País Asignado" } ?: "Sin País Asignado" }
     }
 
     Scaffold(
@@ -76,7 +71,7 @@ fun CollectionScreen(
         ) {
             Spacer(Modifier.height(10.dp))
 
-            // Barra de búsqueda rápida
+            // Barra de búsqueda
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
@@ -99,7 +94,7 @@ fun CollectionScreen(
             if (stamps.isEmpty()) {
                 EmptyCollectionNotice()
             } else if (selectedCountry == null) {
-                // VISTA 1: CARPETAS AGRUPADAS POR PAÍS
+                // VISTA 1: CARPETAS POR PAÍS
                 val filteredCountries = groupedByCountry.keys.filter {
                     it.contains(searchQuery, ignoreCase = true)
                 }
@@ -125,11 +120,11 @@ fun CollectionScreen(
                     }
                 }
             } else {
-                // VISTA 2: LISTA DE SELLOS DEL PAÍS SELECCIONADO
+                // VISTA 2: SELLOS DEL PAÍS SELECCIONADO
                 val stampsOfSelected = groupedByCountry[selectedCountry].orEmpty().filter {
-                    it.motif.contains(searchQuery, ignoreCase = true) ||
+                    it.motif.orEmpty().contains(searchQuery, ignoreCase = true) ||
                     (it.issueYear?.toString() ?: "").contains(searchQuery) ||
-                    it.faceValue.contains(searchQuery, ignoreCase = true)
+                    it.faceValue.orEmpty().contains(searchQuery, ignoreCase = true)
                 }
 
                 if (stampsOfSelected.isEmpty()) {
@@ -146,7 +141,7 @@ fun CollectionScreen(
                         items(stampsOfSelected) { stamp ->
                             StampItemCard(
                                 stamp = stamp,
-                                onClick = { onStampClick(stamp.id) }
+                                onClick = { onStampClick(stamp) }
                             )
                         }
                     }
@@ -243,7 +238,7 @@ private fun StampItemCard(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            val imgFile = File(stamp.imagePath)
+            val imgFile = File(stamp.imagePath ?: "")
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -264,7 +259,7 @@ private fun StampItemCard(
 
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = stamp.motif.ifBlank { "Sello sin título" },
+                    text = stamp.motif?.ifBlank { "Sello sin título" } ?: "Sello sin título",
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
@@ -275,13 +270,13 @@ private fun StampItemCard(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = stamp.faceValue,
+                        text = stamp.faceValue.orEmpty().ifBlank { "S/V" },
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = stamp.issueYear?.toString() ?: stamp.era,
+                        text = stamp.issueYear?.toString() ?: stamp.era.orEmpty(),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
