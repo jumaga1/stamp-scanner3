@@ -1,3 +1,340 @@
+package com.filatelia.scanner.ui.screens
+
+import android.Manifest
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.Camera
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageCapture
+import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
+import coil.compose.rememberAsyncImagePainter
+import com.filatelia.scanner.data.StampEntity
+import com.filatelia.scanner.duplicate.DuplicateConfidence
+import com.filatelia.scanner.ui.viewmodel.ScanStep
+import com.filatelia.scanner.ui.viewmodel.ScanViewModel
+import com.filatelia.scanner.util.CountryFlagHelper
+import java.io.File
+import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.Locale
+
+@Composable
+fun ScanScreen(
+    viewModel: ScanViewModel,
+    onStampSaved: () -> Unit
+) {
+    val context = LocalContext.current
+    val uiState by viewModel.uiState.collectAsState()
+
+    var hasCameraPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        hasCameraPermission = granted
+    }
+    LaunchedEffect(Unit) {
+        if (!hasCameraPermission) permissionLauncher.launch(Manifest.permission.CAMERA)
+    }
+
+    val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        if (uri != null) {
+            val file = copyUriToCacheFile(context, uri)
+            viewModel.onImageCaptured(file)
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        when (val step = uiState.step) {
+            is ScanStep.Idle -> {
+                if (hasCameraPermission) {
+                    CameraCaptureArea(
+                        onCaptured = { file -> viewModel.onImageCaptured(file) },
+                        onPickFromGallery = { galleryLauncher.launch("image/*") }
+                    )
+                } else {
+                    PermissionMissingView { permissionLauncher.launch(Manifest.permission.CAMERA) }
+                }
+            }
+            is ScanStep.Preprocessing -> StatusView("Enfocando y procesando la imagen...")
+            is ScanStep.CheckingDuplicates -> StatusView("Comprobando inventario filatélico...")
+            is ScanStep.RunningAi -> StatusView("Identificando timbre con IA de visión...")
+            is ScanStep.DuplicateFound -> DuplicateWarningView(
+                confidence = step.result.confidence,
+                onContinueAnyway = { viewModel.continueDespiteDuplicate() },
+                onCancel = { viewModel.reset() }
+            )
+            is ScanStep.ReadyToSave -> StampReviewForm(
+                uiState = uiState,
+                onSave = { entity -> viewModel.saveStamp(entity, onSaved = { onStampSaved() }) },
+                onDiscard = { viewModel.reset() }
+            )
+            is ScanStep.Error -> ErrorView(step.message) { viewModel.reset() }
+        }
+    }
+}
+
+@Composable
+private fun CameraCaptureArea(onCaptured: (File) -> Unit, onPickFromGallery: () -> Unit) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val imageCapture = remember { ImageCapture.Builder().build() }
+    var activeCamera by remember { mutableStateOf<Camera?>(null) }
+    var zoomValue by remember { mutableFloatStateOf(0f) }
+
+    Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+        Text(
+            "Lente Filatélico con IA",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.ExtraBold,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Text(
+            "Alinea el timbre en el marco central. La IA analizará la imagen completa.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Spacer(Modifier.height(14.dp))
+
+        Card(
+            shape = RoundedCornerShape(24.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+            modifier = Modifier.fillMaxWidth().height(420.dp)
+        ) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                AndroidView(
+                    modifier = Modifier.fillMaxSize(),
+                    factory = { ctx ->
+                        val previewView = PreviewView(ctx)
+                        val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+                        cameraProviderFuture.addListener({
+                            val cameraProvider = cameraProviderFuture.get()
+                            val preview = Preview.Builder().build().also {
+                                it.setSurfaceProvider(previewView.surfaceProvider)
+                            }
+                            try {
+                                cameraProvider.unbindAll()
+                                val cam = cameraProvider.bindToLifecycle(
+                                    lifecycleOwner,
+                                    CameraSelector.DEFAULT_BACK_CAMERA,
+                                    preview,
+                                    imageCapture
+                                )
+                                activeCamera = cam
+                            } catch (_: Exception) {}
+                        }, ContextCompat.getMainExecutor(ctx))
+                        previewView
+                    }
+                )
+
+                Box(
+                    modifier = Modifier
+                        .size(240.dp)
+                        .align(Alignment.Center)
+                        .border(3.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(18.dp))
+                        .background(Color.White.copy(alpha = 0.05f))
+                )
+
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 14.dp)
+                        .background(Color.Black.copy(alpha = 0.65f), RoundedCornerShape(24.dp))
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    listOf(0.0f to "1x", 0.35f to "2x", 0.7f to "3x").forEach { (level, label) ->
+                        Button(
+                            onClick = {
+                                zoomValue = level
+                                activeCamera?.cameraControl?.setLinearZoom(level)
+                            },
+                            shape = CircleShape,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (zoomValue == level) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.22f)
+                            ),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                            modifier = Modifier.height(36.dp)
+                        ) {
+                            Text(label, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(14.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Default.ZoomOut, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Slider(
+                value = zoomValue,
+                onValueChange = {
+                    zoomValue = it
+                    activeCamera?.cameraControl?.setLinearZoom(it)
+                },
+                valueRange = 0.0f..1.0f,
+                modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
+            )
+            Icon(Icons.Default.ZoomIn, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        }
+
+        Spacer(Modifier.height(14.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedButton(
+                onClick = onPickFromGallery,
+                modifier = Modifier.size(56.dp),
+                shape = CircleShape,
+                contentPadding = PaddingValues(0.dp)
+            ) {
+                Icon(Icons.Default.PhotoLibrary, contentDescription = "Galería")
+            }
+
+            Button(
+                onClick = {
+                    val rawPhotoFile = createTempImageFile(context)
+                    val outputOptions = ImageCapture.OutputFileOptions.Builder(rawPhotoFile).build()
+                    imageCapture.takePicture(
+                        outputOptions,
+                        ContextCompat.getMainExecutor(context),
+                        object : ImageCapture.OnImageSavedCallback {
+                            override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                                val croppedFile = cropCenterSquare(rawPhotoFile, context)
+                                onCaptured(croppedFile)
+                            }
+                            override fun onError(exception: ImageCaptureException) {}
+                        }
+                    )
+                },
+                modifier = Modifier.weight(1f).height(56.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+            ) {
+                Icon(Icons.Default.CameraAlt, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Identificar con IA", fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+private fun cropCenterSquare(originalFile: File, context: android.content.Context): File {
+    return try {
+        val bitmap = BitmapFactory.decodeFile(originalFile.absolutePath) ?: return originalFile
+        val w = bitmap.width
+        val h = bitmap.height
+        val cropSize = (minOf(w, h) * 0.70).toInt()
+        val startX = (w - cropSize) / 2
+        val startY = (h - cropSize) / 2
+
+        val croppedBitmap = Bitmap.createBitmap(bitmap, startX, startY, cropSize, cropSize)
+        val outFile = createTempImageFile(context)
+        val stream = FileOutputStream(outFile)
+        croppedBitmap.compress(Bitmap.CompressFormat.JPEG, 92, stream)
+        stream.flush()
+        stream.close()
+        outFile
+    } catch (_: Exception) {
+        originalFile
+    }
+}
+
+@Composable
+private fun StatusView(message: String) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(40.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        CircularProgressIndicator(
+            color = MaterialTheme.colorScheme.primary,
+            strokeWidth = 4.dp,
+            modifier = Modifier.size(54.dp)
+        )
+        Spacer(Modifier.height(24.dp))
+        Text(message, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun DuplicateWarningView(
+    confidence: DuplicateConfidence,
+    onContinueAnyway: () -> Unit,
+    onCancel: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(16.dp),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(modifier = Modifier.padding(20.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary)
+                Spacer(Modifier.width(8.dp))
+                Text("Posible Ejemplar Duplicado", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.height(10.dp))
+            val message = when (confidence) {
+                DuplicateConfidence.CASI_SEGURO -> "Este ejemplar coincide con uno ya existente en tu colección."
+                DuplicateConfidence.PROBABLE -> "La imagen tiene alta correlación visual con tu colección."
+                DuplicateConfidence.POSIBLE -> "Existe un sello con país y facial similares."
+                DuplicateConfidence.NINGUNO -> ""
+            }
+            Text(message, style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.height(20.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) { Text("Cancelar") }
+                Button(onClick = onContinueAnyway, modifier = Modifier.weight(1f)) { Text("Continuar") }
+            }
+        }
+    }
+}
+
 @Composable
 private fun StampReviewForm(
     uiState: com.filatelia.scanner.ui.viewmodel.ScanUiState,
@@ -6,7 +343,6 @@ private fun StampReviewForm(
 ) {
     val ai = uiState.aiResult
 
-    // Solo extrae lo devuelto por la IA
     val country = ai?.country.orEmpty().ifBlank { "País Desconocido" }
     val era = ai?.era.orEmpty().ifBlank { "No determinado" }
     val faceValue = ai?.faceValue.orEmpty().ifBlank { "S/V" }
@@ -25,7 +361,6 @@ private fun StampReviewForm(
     val flagEmoji = CountryFlagHelper.getFlag(country)
 
     Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-        // Cabecera País Emisor
         Card(
             shape = RoundedCornerShape(18.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
@@ -56,7 +391,6 @@ private fun StampReviewForm(
 
         Spacer(Modifier.height(14.dp))
 
-        // Comparativa de imágenes: Escaneo vs Catálogo Oficial
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -116,7 +450,6 @@ private fun StampReviewForm(
 
         Spacer(Modifier.height(14.dp))
 
-        // Tarjeta de Valor de Mercado
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
@@ -153,7 +486,6 @@ private fun StampReviewForm(
 
         Spacer(Modifier.height(20.dp))
 
-        // Ficha Filatélica Oficial
         Card(
             shape = RoundedCornerShape(18.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -239,4 +571,75 @@ private fun StampReviewForm(
         }
         Spacer(Modifier.height(30.dp))
     }
+}
+
+@Composable
+private fun ReadOnlyInfoRow(label: String, value: String) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 5.dp)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.SemiBold
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+            fontWeight = FontWeight.Normal
+        )
+    }
+}
+
+@Composable
+private fun PermissionMissingView(onRequest: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.height(16.dp))
+        Text("Permiso de Cámara Requerido", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(8.dp))
+        Text("Para escanear tus estampas y sellos postales se requiere acceso a la cámara.")
+        Spacer(Modifier.height(16.dp))
+        Button(onClick = onRequest, shape = RoundedCornerShape(12.dp)) { Text("Conceder Permiso") }
+    }
+}
+
+@Composable
+private fun ErrorView(message: String, onRetry: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(54.dp))
+        Spacer(Modifier.height(16.dp))
+        Text("Aviso", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(8.dp))
+        Text(message, style = MaterialTheme.typography.bodyMedium)
+        Spacer(Modifier.height(20.dp))
+        Button(onClick = onRetry, shape = RoundedCornerShape(12.dp)) { Text("Reintentar") }
+    }
+}
+
+private fun createTempImageFile(context: android.content.Context): File {
+    val dir = File(context.cacheDir, "stamps_cache").apply { mkdirs() }
+    val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(java.util.Date())
+    return File(dir, "IMG_$timestamp.jpg")
+}
+
+private fun copyUriToCacheFile(context: android.content.Context, uri: Uri): File {
+    val dir = File(context.cacheDir, "stamps_cache").apply { mkdirs() }
+    val outFile = File(dir, "PICKED_${System.currentTimeMillis()}.jpg")
+    context.contentResolver.openInputStream(uri)?.use { input ->
+        outFile.outputStream().use { output -> input.copyTo(output) }
+    }
+    return outFile
 }
