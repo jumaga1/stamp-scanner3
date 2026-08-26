@@ -54,10 +54,13 @@ class ScanViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(step = ScanStep.Preprocessing, rawImageFile = file) }
 
+            // Preprocesamiento de imagen
             val prepResult = ImagePreprocessor.preprocess(file)
-            val processedFile = prepResult.outputFile
+            val processedFile = prepResult.outputImage ?: prepResult.processedImage ?: file
 
             val bitmap = BitmapFactory.decodeFile(processedFile.absolutePath)
+                ?: BitmapFactory.decodeFile(file.absolutePath)
+
             if (bitmap == null) {
                 _uiState.update {
                     it.copy(step = ScanStep.Error("Error al procesar la imagen del sello."))
@@ -76,7 +79,7 @@ class ScanViewModel(
                 )
             }
 
-            // Consultar colección actual de sellos
+            // Consultar colección actual de sellos para verificar duplicados
             val existingStamps = try {
                 stampRepository.getAllStamps().first()
             } catch (_: Exception) {
@@ -101,9 +104,7 @@ class ScanViewModel(
                 collection = existingStamps
             )
 
-            val isDup = duplicateResult.hasDuplicate || duplicateResult.confidence != DuplicateConfidence.NINGUNO
-
-            if (isDup) {
+            if (duplicateResult.confidence != DuplicateConfidence.NINGUNO) {
                 _uiState.update {
                     it.copy(
                         duplicateResult = duplicateResult,
@@ -117,7 +118,7 @@ class ScanViewModel(
     }
 
     fun continueDespiteDuplicate() {
-        val file = _uiState.value.processedImageFile ?: return
+        val file = _uiState.value.processedImageFile ?: _uiState.value.rawImageFile ?: return
         runAiAnalysis(file)
     }
 
