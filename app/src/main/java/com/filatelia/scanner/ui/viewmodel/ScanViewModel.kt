@@ -12,7 +12,6 @@ import com.filatelia.scanner.data.StampRepository
 import com.filatelia.scanner.duplicate.DuplicateCheckResult
 import com.filatelia.scanner.duplicate.DuplicateConfidence
 import com.filatelia.scanner.duplicate.DuplicateDetector
-import com.filatelia.scanner.imageprocessing.ImagePreprocessor
 import com.filatelia.scanner.imageprocessing.PerceptualHash
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -54,13 +53,7 @@ class ScanViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(step = ScanStep.Preprocessing, rawImageFile = file) }
 
-            // Preprocesamiento de imagen
-            val prepResult = ImagePreprocessor.preprocess(file)
-            val processedFile = prepResult.outputImage ?: prepResult.processedImage ?: file
-
-            val bitmap = BitmapFactory.decodeFile(processedFile.absolutePath)
-                ?: BitmapFactory.decodeFile(file.absolutePath)
-
+            val bitmap = BitmapFactory.decodeFile(file.absolutePath)
             if (bitmap == null) {
                 _uiState.update {
                     it.copy(step = ScanStep.Error("Error al procesar la imagen del sello."))
@@ -72,7 +65,7 @@ class ScanViewModel(
 
             _uiState.update {
                 it.copy(
-                    processedImageFile = processedFile,
+                    processedImageFile = file,
                     processedBitmap = bitmap,
                     perceptualHash = hash,
                     step = ScanStep.CheckingDuplicates
@@ -87,7 +80,7 @@ class ScanViewModel(
             }
 
             val candidateEntity = StampEntity(
-                imagePath = processedFile.absolutePath,
+                imagePath = file.absolutePath,
                 perceptualHash = hash,
                 country = "",
                 era = "",
@@ -112,7 +105,7 @@ class ScanViewModel(
                     )
                 }
             } else {
-                runAiAnalysis(processedFile)
+                runAiAnalysis(file)
             }
         }
     }
