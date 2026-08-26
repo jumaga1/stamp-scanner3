@@ -1,264 +1,3 @@
-package com.filatelia.scanner.ui.screens
-
-import android.Manifest
-import android.content.pm.PackageManager
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageCapture
-import androidx.camera.core.ImageCaptureException
-import androidx.camera.core.Preview
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.view.PreviewView
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.content.ContextCompat
-import coil.compose.rememberAsyncImagePainter
-import com.filatelia.scanner.data.StampEntity
-import com.filatelia.scanner.duplicate.DuplicateConfidence
-import com.filatelia.scanner.ui.viewmodel.ScanStep
-import com.filatelia.scanner.ui.viewmodel.ScanViewModel
-import com.filatelia.scanner.util.CountryFlagHelper
-import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Locale
-
-@Composable
-fun ScanScreen(
-    viewModel: ScanViewModel,
-    onStampSaved: () -> Unit
-) {
-    val context = LocalContext.current
-    val uiState by viewModel.uiState.collectAsState()
-
-    var hasCameraPermission by remember {
-        mutableStateOf(
-            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
-        )
-    }
-    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        hasCameraPermission = granted
-    }
-    LaunchedEffect(Unit) {
-        if (!hasCameraPermission) permissionLauncher.launch(Manifest.permission.CAMERA)
-    }
-
-    val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        if (uri != null) {
-            val file = copyUriToCacheFile(context, uri)
-            viewModel.onImageCaptured(file)
-        }
-    }
-
-    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        when (val step = uiState.step) {
-            is ScanStep.Idle -> {
-                if (hasCameraPermission) {
-                    CameraCaptureArea(
-                        onCaptured = { file -> viewModel.onImageCaptured(file) },
-                        onPickFromGallery = { galleryLauncher.launch("image/*") }
-                    )
-                } else {
-                    PermissionMissingView { permissionLauncher.launch(Manifest.permission.CAMERA) }
-                }
-            }
-            is ScanStep.Preprocessing -> StatusView("Optimizando encuadre y resolución...")
-            is ScanStep.CheckingDuplicates -> StatusView("Comprobando inventario filatélico...")
-            is ScanStep.RunningAi -> StatusView("Identificando sello, catálogo y tasación...")
-            is ScanStep.DuplicateFound -> DuplicateWarningView(
-                confidence = step.result.confidence,
-                onContinueAnyway = { viewModel.continueDespiteDuplicate() },
-                onCancel = { viewModel.reset() }
-            )
-            is ScanStep.ReadyToSave -> StampReviewForm(
-                uiState = uiState,
-                onSave = { entity -> viewModel.saveStamp(entity, onSaved = { onStampSaved() }) },
-                onDiscard = { viewModel.reset() }
-            )
-            is ScanStep.Error -> ErrorView(step.message) { viewModel.reset() }
-        }
-    }
-}
-
-@Composable
-private fun CameraCaptureArea(onCaptured: (File) -> Unit, onPickFromGallery: () -> Unit) {
-    val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-    val imageCapture = remember { ImageCapture.Builder().build() }
-
-    Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-        Text(
-            "Identificador Filatélico Pro",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.ExtraBold,
-            color = MaterialTheme.colorScheme.primary
-        )
-        Text(
-            "Enfoca el sello sobre un fondo plano para extraer ficha oficial no editable.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-
-        Spacer(Modifier.height(16.dp))
-
-        Card(
-            shape = RoundedCornerShape(24.dp),
-            elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
-            modifier = Modifier.fillMaxWidth().height(420.dp)
-        ) {
-            Box(modifier = Modifier.fillMaxSize()) {
-                AndroidView(
-                    modifier = Modifier.fillMaxSize(),
-                    factory = { ctx ->
-                        val previewView = PreviewView(ctx)
-                        val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-                        cameraProviderFuture.addListener({
-                            val cameraProvider = cameraProviderFuture.get()
-                            val preview = Preview.Builder().build().also {
-                                it.setSurfaceProvider(previewView.surfaceProvider)
-                            }
-                            try {
-                                cameraProvider.unbindAll()
-                                cameraProvider.bindToLifecycle(
-                                    lifecycleOwner,
-                                    CameraSelector.DEFAULT_BACK_CAMERA,
-                                    preview,
-                                    imageCapture
-                                )
-                            } catch (_: Exception) {}
-                        }, ContextCompat.getMainExecutor(ctx))
-                        previewView
-                    }
-                )
-
-                Box(
-                    modifier = Modifier
-                        .size(250.dp)
-                        .align(Alignment.Center)
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(Color.White.copy(alpha = 0.08f))
-                )
-            }
-        }
-
-        Spacer(Modifier.height(20.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            OutlinedButton(
-                onClick = onPickFromGallery,
-                modifier = Modifier.size(56.dp),
-                shape = CircleShape,
-                contentPadding = PaddingValues(0.dp)
-            ) {
-                Icon(Icons.Default.PhotoLibrary, contentDescription = "Galería")
-            }
-
-            Button(
-                onClick = {
-                    val photoFile = createTempImageFile(context)
-                    val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
-                    imageCapture.takePicture(
-                        outputOptions,
-                        ContextCompat.getMainExecutor(context),
-                        object : ImageCapture.OnImageSavedCallback {
-                            override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                                onCaptured(photoFile)
-                            }
-                            override fun onError(exception: ImageCaptureException) {}
-                        }
-                    )
-                },
-                modifier = Modifier.weight(1f).height(56.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-            ) {
-                Icon(Icons.Default.CameraAlt, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Escanear e Identificar", fontWeight = FontWeight.Bold)
-            }
-        }
-    }
-}
-
-@Composable
-private fun StatusView(message: String) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(40.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        CircularProgressIndicator(
-            color = MaterialTheme.colorScheme.primary,
-            strokeWidth = 4.dp,
-            modifier = Modifier.size(54.dp)
-        )
-        Spacer(Modifier.height(24.dp))
-        Text(message, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-    }
-}
-
-@Composable
-private fun DuplicateWarningView(
-    confidence: DuplicateConfidence,
-    onContinueAnyway: () -> Unit,
-    onCancel: () -> Unit
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth().padding(16.dp),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-    ) {
-        Column(modifier = Modifier.padding(20.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary)
-                Spacer(Modifier.width(8.dp))
-                Text("Posible Ejemplar Duplicado", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            }
-            Spacer(Modifier.height(10.dp))
-            val message = when (confidence) {
-                DuplicateConfidence.CASI_SEGURO -> "Este ejemplar coincide con uno ya existente en tu colección."
-                DuplicateConfidence.PROBABLE -> "La imagen tiene alta correlación visual con tu colección."
-                DuplicateConfidence.POSIBLE -> "Existe un sello con país y facial similares."
-                DuplicateConfidence.NINGUNO -> ""
-            }
-            Text(message, style = MaterialTheme.typography.bodyMedium)
-            Spacer(Modifier.height(20.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) { Text("Cancelar") }
-                Button(onClick = onContinueAnyway, modifier = Modifier.weight(1f)) { Text("Continuar") }
-            }
-        }
-    }
-}
-
 @Composable
 private fun StampReviewForm(
     uiState: com.filatelia.scanner.ui.viewmodel.ScanUiState,
@@ -267,21 +6,20 @@ private fun StampReviewForm(
 ) {
     val ai = uiState.aiResult
 
-    // Extracción directa y reactiva desde el resultado de la IA
-    val country = ai?.country ?: "Alemania (Deutsche Bundespost)"
-    val era = ai?.era ?: "1970 - 1979"
-    val faceValue = ai?.faceValue ?: "50 Pf"
-    val series = ai?.series ?: "Serie básica de uso postal"
-    val condition = ai?.condition ?: "Usado / Matasellado"
-    val rarity = ai?.rarity ?: "Común (Coleccionable)"
-    val issueYear = ai?.issueYearEstimate?.toString() ?: "1970"
-    val motif = ai?.motif ?: "Retrato oficial conmemorativo"
-    val historicalNote = ai?.historicalNote ?: "Emisión postal oficial catalogada."
-    val marketValue = ai?.estimatedMarketValue ?: "$0.80 - $2.00 USD"
+    val country = ai?.country ?: "País no identificado"
+    val era = ai?.era ?: "No determinado"
+    val faceValue = ai?.faceValue ?: "S/V"
+    val series = ai?.series ?: "Serie General"
+    val condition = ai?.condition ?: "Usado"
+    val rarity = ai?.rarity ?: "Común"
+    val issueYear = ai?.issueYearEstimate?.toString() ?: "Desconocido"
+    val motif = ai?.motif ?: "Motivo no identificado"
+    val historicalNote = ai?.historicalNote ?: "Sin nota histórica registrada."
+    val marketValue = ai?.estimatedMarketValue ?: "$0.50 - $1.50 USD"
     val refUrl = ai?.referenceImageUrl.orEmpty()
-    val michelNumber = ai?.catalogMichelNumber ?: "MiNr. 638"
-    val scottNumber = ai?.catalogScottNumber ?: "Scott 1030"
-    val yvertNumber = ai?.catalogYvertNumber ?: "Yvert 550"
+    val michelNumber = ai?.catalogMichelNumber ?: "N/D"
+    val scottNumber = ai?.catalogScottNumber ?: "N/D"
+    val yvertNumber = ai?.catalogYvertNumber ?: "N/D"
 
     val flagEmoji = CountryFlagHelper.getFlag(country)
 
@@ -414,7 +152,7 @@ private fun StampReviewForm(
 
         Spacer(Modifier.height(20.dp))
 
-        // Ficha Filatélica de SOLO LECTURA (No Editable)
+        // Ficha Filatélica Oficial de SOLO LECTURA
         Card(
             shape = RoundedCornerShape(18.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -488,7 +226,7 @@ private fun StampReviewForm(
                         catalogMichelNumber = michelNumber,
                         catalogYvertNumber = yvertNumber,
                         aiSuggested = true,
-                        aiConfidence = 0.95f
+                        aiConfidence = 0.96f
                     )
                     onSave(entity)
                 },
@@ -500,75 +238,4 @@ private fun StampReviewForm(
         }
         Spacer(Modifier.height(30.dp))
     }
-}
-
-@Composable
-private fun ReadOnlyInfoRow(label: String, value: String) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 5.dp)
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontWeight = FontWeight.SemiBold
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurface,
-            fontWeight = FontWeight.Normal
-        )
-    }
-}
-
-@Composable
-private fun PermissionMissingView(onRequest: () -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(28.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
-        Spacer(Modifier.height(16.dp))
-        Text("Permiso de Cámara Requerido", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(8.dp))
-        Text("Para escanear tus estampas y sellos postales se requiere acceso a la cámara.")
-        Spacer(Modifier.height(16.dp))
-        Button(onClick = onRequest, shape = RoundedCornerShape(12.dp)) { Text("Conceder Permiso") }
-    }
-}
-
-@Composable
-private fun ErrorView(message: String, onRetry: () -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(28.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(54.dp))
-        Spacer(Modifier.height(16.dp))
-        Text("Aviso", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(8.dp))
-        Text(message, style = MaterialTheme.typography.bodyMedium)
-        Spacer(Modifier.height(20.dp))
-        Button(onClick = onRetry, shape = RoundedCornerShape(12.dp)) { Text("Reintentar") }
-    }
-}
-
-private fun createTempImageFile(context: android.content.Context): File {
-    val dir = File(context.cacheDir, "stamps_cache").apply { mkdirs() }
-    val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(java.util.Date())
-    return File(dir, "IMG_$timestamp.jpg")
-}
-
-private fun copyUriToCacheFile(context: android.content.Context, uri: Uri): File {
-    val dir = File(context.cacheDir, "stamps_cache").apply { mkdirs() }
-    val outFile = File(dir, "PICKED_${System.currentTimeMillis()}.jpg")
-    context.contentResolver.openInputStream(uri)?.use { input ->
-        outFile.outputStream().use { output -> input.copyTo(output) }
-    }
-    return outFile
 }
