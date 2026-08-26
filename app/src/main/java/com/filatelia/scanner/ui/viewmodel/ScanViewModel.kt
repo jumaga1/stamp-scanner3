@@ -9,9 +9,9 @@ import com.filatelia.scanner.ai.AiRecognitionRepository
 import com.filatelia.scanner.ai.StampRecognitionResult
 import com.filatelia.scanner.data.StampEntity
 import com.filatelia.scanner.data.StampRepository
-import com.filatelia.scanner.duplicate.DuplicateCheckResult
 import com.filatelia.scanner.duplicate.DuplicateConfidence
 import com.filatelia.scanner.duplicate.DuplicateDetector
+import com.filatelia.scanner.duplicate.DuplicateResult
 import com.filatelia.scanner.imageprocessing.ImagePreprocessor
 import com.filatelia.scanner.imageprocessing.PerceptualHash
 import kotlinx.coroutines.Dispatchers
@@ -28,7 +28,7 @@ sealed interface ScanStep {
     data object Preprocessing : ScanStep
     data object CheckingDuplicates : ScanStep
     data object RunningAi : ScanStep
-    data class DuplicateFound(val result: DuplicateCheckResult) : ScanStep
+    data class DuplicateFound(val result: DuplicateResult) : ScanStep
     data object ReadyToSave : ScanStep
     data class Error(val message: String) : ScanStep
 }
@@ -39,7 +39,7 @@ data class ScanUiState(
     val processedImageFile: File? = null,
     val processedBitmap: Bitmap? = null,
     val perceptualHash: String? = null,
-    val duplicateResult: DuplicateCheckResult? = null,
+    val duplicateResult: DuplicateResult? = null,
     val aiResult: StampRecognitionResult? = null,
     val aiUnavailableReason: String? = null
 )
@@ -55,7 +55,7 @@ class ScanViewModel(
     fun onImageCaptured(file: File) {
         viewModelScope.launch {
             _uiState.value = ScanUiState(step = ScanStep.Preprocessing, rawImageFile = file)
-            
+
             val preprocessed = withContext(Dispatchers.Default) {
                 ImagePreprocessor.preprocess(file)
             }
@@ -71,11 +71,7 @@ class ScanViewModel(
                 step = ScanStep.CheckingDuplicates
             )
 
-            val existing = try {
-                stampRepository.stamps.firstOrNull() ?: emptyList()
-            } catch (_: Exception) {
-                emptyList()
-            }
+            val existing: List<StampEntity> = stampRepository.stamps.firstOrNull() ?: emptyList()
 
             val candidate = StampEntity(
                 imagePath = preprocessed.absolutePath,
@@ -133,15 +129,7 @@ class ScanViewModel(
 
     fun saveStamp(entity: StampEntity, onSaved: () -> Unit) {
         viewModelScope.launch {
-            try {
-                stampRepository.insertStamp(entity)
-            } catch (_: Exception) {
-                try {
-                    // Fallback de compatibilidad
-                    val method = stampRepository.javaClass.methods.firstOrNull { it.name in listOf("insert", "saveStamp", "addStamp") }
-                    method?.invoke(stampRepository, entity)
-                } catch (_: Exception) {}
-            }
+            stampRepository.insert(entity)
             reset()
             onSaved()
         }
