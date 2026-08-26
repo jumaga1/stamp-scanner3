@@ -28,6 +28,9 @@ jobs:
           gradle-version: '8.7'
 
       - name: Build Debug APK
+        env:
+          # Aquí se conecta el Secret de GitHub con Gradle
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
         run: gradle assembleDebug --no-daemon --stacktrace
 
       - name: Upload Debug APK Artifact
