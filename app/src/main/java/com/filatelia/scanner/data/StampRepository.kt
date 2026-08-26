@@ -4,6 +4,12 @@ import com.filatelia.scanner.duplicate.DuplicateDetector
 import com.filatelia.scanner.duplicate.DuplicateResult
 import kotlinx.coroutines.flow.Flow
 
+enum class SortOrder {
+    RECENT,
+    COUNTRY,
+    YEAR
+}
+
 class StampRepository(private val stampDao: StampDao) {
 
     val stamps: Flow<List<StampEntity>> = stampDao.getAllStamps()
@@ -11,6 +17,10 @@ class StampRepository(private val stampDao: StampDao) {
     fun getAll(): Flow<List<StampEntity>> = stampDao.getAllStamps()
 
     fun getAllStamps(): Flow<List<StampEntity>> = stampDao.getAllStamps()
+
+    fun observeStamps(query: String? = null, sort: SortOrder = SortOrder.RECENT): Flow<List<StampEntity>> {
+        return stampDao.observeStamps(query?.ifBlank { null })
+    }
 
     suspend fun getStampById(id: Long): StampEntity? = stampDao.getStampById(id)
 
