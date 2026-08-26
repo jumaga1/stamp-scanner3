@@ -1,6 +1,5 @@
 package com.filatelia.scanner.ai
 
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -42,7 +41,7 @@ data class GeminiCandidate(
 )
 
 @Serializable
-data class AiStampJson(
+data class StampRecognitionResult(
     val country: String? = null,
     val era: String? = null,
     val issueYearEstimate: Int? = null,
@@ -57,3 +56,10 @@ data class AiStampJson(
     val catalogYvertNumber: String? = null,
     val confidence: Float = 0.85f
 )
+
+sealed interface AiRecognitionOutcome {
+    data class Success(val result: StampRecognitionResult) : AiRecognitionOutcome
+    data class Error(val message: String) : AiRecognitionOutcome
+    data object OfflineFallback : AiRecognitionOutcome
+    data object RateLimited : AiRecognitionOutcome
+}
