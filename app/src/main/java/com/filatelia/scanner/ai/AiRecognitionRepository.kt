@@ -2,16 +2,8 @@ package com.filatelia.scanner.ai
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Canvas
-import android.graphics.ColorMatrix
-import android.graphics.ColorMatrixColorFilter
-import android.graphics.Paint
 import android.util.Base64
 import com.filatelia.scanner.BuildConfig
-import com.google.android.gms.tasks.Tasks
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.text.TextRecognition
-import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
@@ -29,18 +21,18 @@ class AiRecognitionRepository(
     private val apiKeyOverride: String? = null
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
-    private val textRecognizer by lazy { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
 
+    // Lee la API Key real desde BuildConfig o inyección dinámica
     private val effectiveApiKey: String
         get() = when {
             !apiKeyOverride.isNullOrBlank() -> apiKeyOverride
             BuildConfig.AI_API_KEY.isNotBlank() -> BuildConfig.AI_API_KEY
-            else -> "AQ.Ab8RN6KqD2wgAw69n4UdJks6mqCpCi_bXLvCHlZT7aONEI19xQ"
+            else -> ""
         }
 
     private val httpClient: OkHttpClient by lazy {
         val logging = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BODY
+            level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BODY else HttpLoggingInterceptor.Level.NONE
         }
         OkHttpClient.Builder()
             .addInterceptor(logging)
@@ -50,153 +42,123 @@ class AiRecognitionRepository(
     }
 
     suspend fun recognize(imageFile: File): AiRecognitionOutcome = withContext(Dispatchers.IO) {
-        try {
-            val originalBitmap = BitmapFactory.decodeFile(imageFile.absolutePath)
-                ?: return@withContext AiRecognitionOutcome.Error("No se pudo cargar la imagen")
-
-            val enhancedBitmap = enhanceForTextReading(originalBitmap)
-
-            // 1. EXTRACCIÓN OCR COMPLETA Y DIRECTA
-            val ocrText = try {
-                val inputImage = InputImage.fromBitmap(enhancedBitmap, 0)
-                val visionText = Tasks.await(textRecognizer.process(inputImage), 5, TimeUnit.SECONDS)
-                visionText.text.replace("\n", " ").trim()
-            } catch (_: Exception) {
-                ""
-            }
-
-            // 2. PARSEO DINÁMICO DE TEXTOS, AÑOS Y NÚMEROS FACIALES
-            val lines = ocrText.split(" ").filter { it.isNotBlank() }
-            val ocrLower = ocrText.lowercase()
-
-            // Detección de País
-            val detectedCountry = when {
-                ocrLower.contains("bundespost berlin") || (ocrLower.contains("berlin") && ocrLower.contains("post")) -> "Alemania (Berlín Oeste)"
-                ocrLower.contains("deutsche post") || ocrLower.contains("ddr") -> "Alemania (RDA / DDR)"
-                ocrLower.contains("deutsche bundespost") || ocrLower.contains("bundespost") || ocrLower.contains("deutschland") -> "Alemania (Deutsche Bundespost)"
-                ocrLower.contains("deutsches reich") || ocrLower.contains("reich") -> "Alemania (Deutsches Reich)"
-                ocrLower.contains("mexico") || ocrLower.contains("méxico") -> "México"
-                ocrLower.contains("españa") || ocrLower.contains("correos") -> "España"
-                ocrLower.contains("france") || ocrLower.contains("republique francaise") -> "Francia"
-                ocrLower.contains("usa") || ocrLower.contains("united states") -> "Estados Unidos"
-                ocrLower.contains("helvetia") -> "Suiza (Helvetia)"
-                ocrLower.contains("österreich") || ocrLower.contains("austria") -> "Austria"
-                else -> "Alemania (Deutsche Bundespost)"
-            }
-
-            // Detección de Año Real impreso en el sello (ej. 1980, 1988, 1971, etc.)
-            val yearMatch = Regex("""\b(18\d{2}|19\d{2}|20\d{2})\b""").find(ocrText)?.value?.toIntOrNull()
-            val issueYear = yearMatch ?: when {
-                ocrLower.contains("1980") -> 1980
-                ocrLower.contains("1988") -> 1988
-                ocrLower.contains("1989") -> 1989
-                ocrLower.contains("1991") -> 1991
-                ocrLower.contains("1971") -> 1971
-                ocrLower.contains("1972") -> 1972
-                else -> 1980
-            }
-
-            // Detección de Facial Compuesto o Simple (ej. 60+30, 80, 300, 100, 25, 10)
-            val plusPattern = Regex("""\b(\d{1,3}\s*\+\s*\d{1,3})\b""").find(ocrText)?.value
-            val singleNumber = Regex("""\b(\d{1,4})\b""").findAll(ocrText).map { it.value }
-                .filter { it.toIntOrNull() != issueYear && (it.toIntOrNull() ?: 0) !in 1400..1850 }
-                .firstOrNull()
-
-            val rawFace = when {
-                plusPattern != null -> plusPattern.replace(" ", "")
-                singleNumber != null -> singleNumber
-                ocrLower.contains("60") -> "60+30"
-                ocrLower.contains("80") -> "80"
-                ocrLower.contains("300") -> "300"
-                ocrLower.contains("100") -> "100"
-                else -> "60+30"
-            }
-            val faceValue = "$rawFace Pf"
-
-            // Detección de Motivo y Serie Dinámica
-            val motifCandidate = when {
-                ocrLower.contains("fip") || ocrLower.contains("essen") -> "FIP-Kongress Essen 1980 (Für Philatelie und Postgeschichte)"
-                ocrLower.contains("hutten") || ocrLower.contains("ulrich") -> "Ulrich von Hutten (1488–1523)"
-                ocrLower.contains("fanny") || ocrLower.contains("hensel") -> "Fanny Hensel (1805–1847) - Compositora"
-                ocrLower.contains("europa") || ocrLower.contains("cept") -> "EUROPA CEPT 1991 - Satélite Kopernikus"
-                ocrLower.contains("durer") || ocrLower.contains("dürer") -> "Albrecht Dürer (1471–1528)"
-                ocrLower.contains("cranach") -> "Lucas Cranach d. Ä. (1472–1553)"
-                ocrText.isNotBlank() -> ocrText.take(45)
-                else -> "Emisión Filatélica Conmemorativa $issueYear"
-            }
-
-            val series = when {
-                ocrLower.contains("fip") || ocrLower.contains("essen") -> "Congreso Filatélico Internacional FIP Essen / Día del Sello"
-                ocrLower.contains("fanny") || ocrLower.contains("hensel") -> "Mujeres de la historia alemana (Frauen der deutschen Geschichte)"
-                ocrLower.contains("europa") -> "Emisiones Anuales EUROPA (CEPT)"
-                else -> "Emisión Conmemorativa Oficial"
-            }
-
-            // Estimación del Catálogo Michel en base al año y motivo
-            val michelNumber = when {
-                issueYear == 1980 && rawFace.contains("60") -> "MiNr. 1045"
-                issueYear == 1988 && rawFace == "80" -> "MiNr. 1364"
-                issueYear == 1989 && rawFace == "300" -> "MiNr. 1433"
-                issueYear == 1991 && rawFace == "100" -> "MiNr. 1522"
-                issueYear == 1971 && rawFace == "10" -> "MiNr. 675"
-                issueYear == 1972 && rawFace == "25" -> "MiNr. 718"
-                else -> "MiNr. ${issueYear * 2 / 3}"
-            }
-
-            val era = "${(issueYear / 10) * 10} - ${(issueYear / 10) * 10 + 9}"
-            val historicalNote = "Sello postal oficial emitido en $issueYear por la $detectedCountry con motivo de $series."
-
-            // 3. BÚSQUEDA AUTOMÁTICA EN COMMONS DE LA IMAGEN OFICIAL HD
-            val queryParam = "$motifCandidate $issueYear Briefmarke"
-            val hdImageUrl = fetchHdStampImage(queryParam)
-
-            val finalResult = StampRecognitionResult(
-                country = detectedCountry,
-                era = era,
-                issueYearEstimate = issueYear,
-                faceValue = faceValue,
-                series = series,
-                condition = "Usado / Matasellado",
-                rarity = "Común (Coleccionable)",
-                motif = motifCandidate,
-                historicalNote = historicalNote,
-                estimatedMarketValue = "$0.50 - $2.00 USD",
-                referenceImageUrl = hdImageUrl,
-                catalogMichelNumber = michelNumber,
-                catalogScottNumber = "Scott Ref.",
-                catalogYvertNumber = "Yvert Ref.",
-                confidence = 0.98f
+        val key = effectiveApiKey
+        if (key.isBlank()) {
+            return@withContext AiRecognitionOutcome.Error(
+                "Falta configurar tu API Key de IA. Agrégala en local.properties o en los ajustes."
             )
+        }
 
-            AiRecognitionOutcome.Success(finalResult)
+        try {
+            val bitmap = BitmapFactory.decodeFile(imageFile.absolutePath)
+                ?: return@withContext AiRecognitionOutcome.Error("No se pudo procesar la imagen capturada.")
+
+            // Comprimir y codificar en Base64 con resolución balanceada
+            val outputStream = ByteArrayOutputStream()
+            val maxDimension = 1024
+            val scale = if (bitmap.width > maxDimension || bitmap.height > maxDimension) {
+                val ratio = maxDimension.toFloat() / maxOf(bitmap.width, bitmap.height)
+                Bitmap.createScaledBitmap(bitmap, (bitmap.width * ratio).toInt(), (bitmap.height * ratio).toInt(), true)
+            } else {
+                bitmap
+            }
+            scale.compress(Bitmap.CompressFormat.JPEG, 85, outputStream)
+            val base64Image = Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
+
+            val prompt = """
+                Eres un perito tasador y filatelista experto. Analiza minuciosamente la imagen de este sello postal (timbre).
+                Examina el texto, facial, motivo o personaje histórico, país/emisión y año.
+                
+                Devuelve EXCLUSIVAMENTE un JSON con esta estructura exacta:
+                {
+                  "country": "Nombre oficial del país o entidad emisora",
+                  "era": "Periodo o década histórica (ej. 1980 - 1989)",
+                  "issueYearEstimate": 1980,
+                  "faceValue": "Valor facial exacto con unidad (ej. 60+30 Pf, 50 c)",
+                  "series": "Nombre de la serie oficial o emisión conmemorativa",
+                  "condition": "Usado / Matasellado o Nuevo",
+                  "rarity": "Común, Escaso o Raro",
+                  "motif": "Descripción exacta del motivo, personaje, obra o evento ilustrado",
+                  "historicalNote": "Explicación detallada y contexto histórico de la emisión",
+                  "estimatedMarketValue": "Rango de precio de mercado filatélico (ej. $1.00 - $3.00 USD)",
+                  "catalogMichelNumber": "Código aproximado Catálogo Michel (MiNr.)",
+                  "catalogScottNumber": "Código aproximado Catálogo Scott",
+                  "catalogYvertNumber": "Código aproximado Catálogo Yvert",
+                  "confidence": 0.95
+                }
+            """.trimIndent()
+
+            val requestPayload = buildJsonObject {
+                put("contents", buildJsonArray {
+                    add(buildJsonObject {
+                        put("parts", buildJsonArray {
+                            add(buildJsonObject { put("text", prompt) })
+                            add(buildJsonObject {
+                                put("inlineData", buildJsonObject {
+                                    put("mimeType", "image/jpeg")
+                                    put("data", base64Image)
+                                })
+                            })
+                        })
+                    })
+                })
+                put("generationConfig", buildJsonObject {
+                    put("responseMimeType", "application/json")
+                })
+            }.toString()
+
+            val mediaType = "application/json; charset=utf-8".toMediaType()
+            val models = listOf("gemini-2.0-flash", "gemini-1.5-flash")
+            var lastError = ""
+
+            for (model in models) {
+                try {
+                    val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$key"
+                    val requestBuilder = Request.Builder()
+                        .url(url)
+                        .addHeader("x-goog-api-key", key)
+                        .post(requestPayload.toRequestBody(mediaType))
+
+                    if (key.startsWith("AQ.")) {
+                        requestBuilder.addHeader("Authorization", "Bearer $key")
+                    }
+
+                    val response = httpClient.newCall(requestBuilder.build()).execute()
+                    val bodyString = response.body?.string().orEmpty()
+
+                    if (response.isSuccessful && bodyString.isNotBlank()) {
+                        val rootObj = json.parseToJsonElement(bodyString).jsonObject
+                        val rawText = rootObj["candidates"]?.jsonArray?.firstOrNull()?.jsonObject
+                            ?.get("content")?.jsonObject
+                            ?.get("parts")?.jsonArray?.firstOrNull()?.jsonObject
+                            ?.get("text")?.jsonPrimitive?.content
+
+                        if (!rawText.isNullOrBlank()) {
+                            val cleanJson = rawText.replace("```json", "").replace("```", "").trim()
+                            val parsedStamp = json.decodeFromString(StampRecognitionResult.serializer(), cleanJson)
+
+                            // Búsqueda de imagen de catálogo en Wikimedia Commons
+                            val hdUrl = fetchHdStampImage("${parsedStamp.motif ?: ""} ${parsedStamp.country ?: ""}")
+                            return@withContext AiRecognitionOutcome.Success(parsedStamp.copy(referenceImageUrl = hdUrl))
+                        }
+                    } else {
+                        lastError = "HTTP ${response.code}: $bodyString"
+                    }
+                } catch (e: Exception) {
+                    lastError = e.message ?: "Error de conexión"
+                }
+            }
+
+            AiRecognitionOutcome.Error("No se pudo identificar el timbre con la IA: $lastError")
         } catch (e: Exception) {
-            AiRecognitionOutcome.Error(e.message ?: "Error al procesar el sello")
+            AiRecognitionOutcome.Error("Error al procesar el timbre: ${e.message}")
         }
-    }
-
-    private fun enhanceForTextReading(src: Bitmap): Bitmap {
-        val dest = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(dest)
-        val paint = Paint()
-        val matrix = ColorMatrix().apply {
-            setSaturation(0f)
-            val contrast = 1.45f
-            postConcat(ColorMatrix(floatArrayOf(
-                contrast, 0f, 0f, 0f, -20f,
-                0f, contrast, 0f, 0f, -20f,
-                0f, 0f, contrast, 0f, -20f,
-                0f, 0f, 0f, 1f, 0f
-            )))
-        }
-        paint.colorFilter = ColorMatrixColorFilter(matrix)
-        canvas.drawBitmap(src, 0f, 0f, paint)
-        return dest
     }
 
     private fun fetchHdStampImage(searchTerm: String): String? {
         return try {
             if (searchTerm.isBlank()) return null
-            val encodedQuery = URLEncoder.encode(searchTerm, "UTF-8")
+            val encodedQuery = URLEncoder.encode("$searchTerm stamp Briefmarke", "UTF-8")
             val url = "https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=$encodedQuery&gsrlimit=1&prop=imageinfo&iiprop=url&format=json"
 
             val request = Request.Builder().url(url).build()
