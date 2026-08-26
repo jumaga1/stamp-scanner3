@@ -8,6 +8,7 @@ data class StampEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
     val imagePath: String,
+    val referenceImageUrl: String? = null,
     val perceptualHash: String = "",
     val country: String? = null,
     val era: String? = null,
