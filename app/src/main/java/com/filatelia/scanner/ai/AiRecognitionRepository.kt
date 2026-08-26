@@ -101,7 +101,6 @@ class AiRecognitionRepository(
 
             val mediaType = "application/json; charset=utf-8".toMediaType()
 
-            // Gateways compatibles con tokens de Vertex Express y Google AI
             val targetEndpoints = listOf(
                 "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$token",
                 "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$token",
@@ -134,14 +133,13 @@ class AiRecognitionRepository(
                             val cleanJson = responseText.replace("```json", "").replace("```", "").trim()
                             val baseStamp = json.decodeFromString(StampRecognitionResult.serializer(), cleanJson)
                             
-                            // Buscar imagen oficial HD en Wikimedia Commons basada en el motivo identificado
                             val hdUrl = fetchHdStampImage("${baseStamp.motif.orEmpty()} ${baseStamp.country.orEmpty()}")
                             val finalStamp = baseStamp.copy(referenceImageUrl = hdUrl)
                             
                             return@withContext AiRecognitionOutcome.Success(finalStamp)
                         }
                     } else {
-                        lastError = "HTTP ${response.code()}: $bodyString"
+                        lastError = "HTTP ${response.code}: $bodyString"
                     }
                 } catch (e: Exception) {
                     lastError = e.message ?: "Error de red"
