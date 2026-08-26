@@ -51,10 +51,11 @@ data class StampRecognitionResult(
     val rarity: String? = null,
     val motif: String? = null,
     val historicalNote: String? = null,
-    val catalogScottNumber: String? = null,
+    val estimatedMarketValue: String? = null,
     val catalogMichelNumber: String? = null,
+    val catalogScottNumber: String? = null,
     val catalogYvertNumber: String? = null,
-    val confidence: Float = 0.85f
+    val confidence: Float = 0.90f
 )
 
 sealed interface AiRecognitionOutcome {
