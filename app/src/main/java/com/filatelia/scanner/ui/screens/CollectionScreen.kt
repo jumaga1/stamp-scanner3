@@ -1,15 +1,19 @@
 package com.filatelia.scanner.ui.screens
 
-import androidx.compose.foundation.Image
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CalendarToday
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -18,159 +22,132 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.rememberAsyncImagePainter
+import coil.compose.AsyncImage
 import com.filatelia.scanner.data.StampEntity
 import com.filatelia.scanner.ui.viewmodel.CollectionViewModel
 import com.filatelia.scanner.util.CountryFlagHelper
 import java.io.File
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CollectionScreen(
     viewModel: CollectionViewModel,
-    onStampClick: (StampEntity) -> Unit
+    onStampClick: (Long) -> Unit
 ) {
-    val stamps by viewModel.stamps.collectAsState()
-    val searchQuery by viewModel.searchQuery.collectAsState()
+    val uiState by viewModel.uiState.collectAsState()
+    var selectedCountry by remember { mutableStateOf<String?>(null) }
+    var searchQuery by remember { mutableStateOf("") }
 
-    val groupedStamps = remember(stamps) {
-        stamps.groupBy { it.country ?: "Sin País Asignado" }
-            .mapValues { entry ->
-                entry.value.groupBy { it.issueYear ?: 0 }
-                    .toSortedMap(compareByDescending { it })
-            }
-            .toSortedMap()
+    val stamps = uiState.stamps
+    val groupedByCountry = remember(stamps) {
+        stamps.groupBy { it.country.ifBlank { "Sin País Asignado" } }
     }
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
-                Text(
-                    "Álbum de Colección",
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Text(
-                    "${stamps.size} sellos en ${groupedStamps.size} países",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-
-        Spacer(Modifier.height(14.dp))
-
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = { viewModel.onSearchQueryChanged(it) },
-            placeholder = { Text("Buscar por país, Michel Nº o motivo...") },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-            shape = RoundedCornerShape(14.dp),
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(Modifier.height(14.dp))
-
-        if (stamps.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(
-                    "Tu álbum está vacío.\nEscanea un sello para comenzar.",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(18.dp)
-            ) {
-                groupedStamps.forEach { (country, yearsMap) ->
-                    item {
-                        val flag = CountryFlagHelper.getFlag(country)
-                        val totalInCountry = yearsMap.values.sumOf { it.size }
-
-                        Card(
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(flag, fontSize = 28.sp)
-                                Spacer(Modifier.width(10.dp))
-                                Text(
-                                    country,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                Surface(
-                                    color = MaterialTheme.colorScheme.primary,
-                                    shape = RoundedCornerShape(8.dp)
-                                ) {
-                                    Text(
-                                        "$totalInCountry sellos",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onPrimary,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                    )
-                                }
-                            }
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = selectedCountry ?: "Colección por Países",
+                        fontWeight = FontWeight.Bold
+                    )
+                },
+                navigationIcon = {
+                    if (selectedCountry != null) {
+                        IconButton(onClick = { selectedCountry = null }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Regresar a países")
                         }
                     }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            )
+        }
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .padding(horizontal = 14.dp)
+        ) {
+            Spacer(Modifier.height(10.dp))
 
-                    yearsMap.forEach { (year, stampList) ->
-                        item {
-                            val yearText = if (year > 0) "Año $year" else "Año no especificado"
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(start = 8.dp, top = 8.dp, bottom = 6.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.CalendarToday,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.secondary,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    yearText,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.secondary
-                                )
-                                Text(
-                                    " (${stampList.size})",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+            // Barra de búsqueda rápida
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("Buscar por motivo, año o facial...") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { searchQuery = "" }) {
+                            Icon(Icons.Default.Close, contentDescription = "Limpiar")
                         }
+                    }
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(16.dp)
+            )
 
-                        items(stampList.chunked(2)) { rowStamps ->
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
-                            ) {
-                                rowStamps.forEach { stamp ->
-                                    Box(modifier = Modifier.weight(1f)) {
-                                        StampCard(stamp = stamp, onClick = { onStampClick(stamp) })
-                                    }
-                                }
-                                if (rowStamps.size == 1) {
-                                    Spacer(modifier = Modifier.weight(1f))
-                                }
-                            }
+            Spacer(Modifier.height(14.dp))
+
+            if (stamps.isEmpty()) {
+                EmptyCollectionNotice()
+            } else if (selectedCountry == null) {
+                // VISTA 1: CARPETAS AGRUPADAS POR PAÍS
+                val filteredCountries = groupedByCountry.keys.filter {
+                    it.contains(searchQuery, ignoreCase = true)
+                }
+
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(2),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    items(filteredCountries) { countryName ->
+                        val stampsInCountry = groupedByCountry[countryName].orEmpty()
+                        val flag = CountryFlagHelper.getFlag(countryName)
+                        val previewStamp = stampsInCountry.firstOrNull()
+
+                        CountryFolderCard(
+                            countryName = countryName,
+                            flag = flag,
+                            stampCount = stampsInCountry.size,
+                            previewStamp = previewStamp,
+                            onClick = { selectedCountry = countryName }
+                        )
+                    }
+                }
+            } else {
+                // VISTA 2: LISTA DE SELLOS DEL PAÍS SELECCIONADO
+                val stampsOfSelected = groupedByCountry[selectedCountry].orEmpty().filter {
+                    it.motif.contains(searchQuery, ignoreCase = true) ||
+                    (it.issueYear?.toString() ?: "").contains(searchQuery) ||
+                    it.faceValue.contains(searchQuery, ignoreCase = true)
+                }
+
+                if (stampsOfSelected.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("No hay sellos que coincidan con la búsqueda.")
+                    }
+                } else {
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(2),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        items(stampsOfSelected) { stamp ->
+                            StampItemCard(
+                                stamp = stamp,
+                                onClick = { onStampClick(stamp.id) }
+                            )
                         }
                     }
                 }
@@ -180,60 +157,166 @@ fun CollectionScreen(
 }
 
 @Composable
-private fun StampCard(stamp: StampEntity, onClick: () -> Unit) {
+private fun CountryFolderCard(
+    countryName: String,
+    flag: String,
+    stampCount: Int,
+    previewStamp: StampEntity?,
+    onClick: () -> Unit
+) {
     Card(
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(210.dp)
+            .clickable { onClick() }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surface),
+                contentAlignment = Alignment.Center
+            ) {
+                val imgFile = previewStamp?.imagePath?.let { File(it) }
+                if (imgFile != null && imgFile.exists()) {
+                    AsyncImage(
+                        model = imgFile,
+                        contentDescription = countryName,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize().padding(4.dp)
+                    )
+                } else {
+                    Text(flag, fontSize = 48.sp)
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = "$flag $countryName",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "$stampCount ${if (stampCount == 1) "sello" else "sellos"}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun StampItemCard(
+    stamp: StampEntity,
+    onClick: () -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         modifier = Modifier
             .fillMaxWidth()
+            .height(230.dp)
             .clickable { onClick() }
     ) {
-        Column {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            val imgFile = File(stamp.imagePath)
             Box(
                 modifier = Modifier
+                    .weight(1f)
                     .fillMaxWidth()
-                    .height(135.dp)
-                    .background(Color.Black.copy(alpha = 0.04f))
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color.Black.copy(alpha = 0.04f)),
+                contentAlignment = Alignment.Center
             ) {
-                // Prioriza la imagen HD oficial si está disponible; de lo contrario muestra la foto escaneada
-                val imageModel = stamp.referenceImageUrl?.ifBlank { null } ?: File(stamp.imagePath)
-
-                Image(
-                    painter = rememberAsyncImagePainter(model = imageModel),
-                    contentDescription = stamp.motif ?: "Sello",
+                AsyncImage(
+                    model = if (imgFile.exists()) imgFile else stamp.referenceImageUrl,
+                    contentDescription = stamp.motif,
                     contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize().padding(6.dp)
+                    modifier = Modifier.fillMaxSize().padding(4.dp)
                 )
             }
-            Column(modifier = Modifier.padding(10.dp)) {
+
+            Spacer(Modifier.height(6.dp))
+
+            Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    stamp.motif ?: (stamp.series ?: "Sello Postal"),
-                    style = MaterialTheme.typography.titleSmall,
+                    text = stamp.motif.ifBlank { "Sello sin título" },
+                    style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Bold,
-                    maxLines = 1
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
-                Text(
-                    "Facial: ${stamp.faceValue ?: "S/V"}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                if (!stamp.estimatedMarketValue.isNullOrBlank()) {
-                    Spacer(Modifier.height(4.dp))
-                    Surface(
-                        color = MaterialTheme.colorScheme.tertiaryContainer,
-                        shape = RoundedCornerShape(4.dp)
-                    ) {
-                        Text(
-                            stamp.estimatedMarketValue!!,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onTertiaryContainer,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                        )
-                    }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = stamp.faceValue,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = stamp.issueYear?.toString() ?: stamp.era,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun EmptyCollectionNotice() {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(40.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            Icons.Default.CollectionsBookmark,
+            contentDescription = null,
+            modifier = Modifier.size(64.dp),
+            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+        )
+        Spacer(Modifier.height(16.dp))
+        Text(
+            "Tu colección está vacía",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Usa el botón 'Escanear' para añadir y catalogar tus primeros timbres postales.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
