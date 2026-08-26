@@ -5,11 +5,9 @@ import android.graphics.BitmapFactory
 import android.util.Base64
 import com.filatelia.scanner.BuildConfig
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -37,8 +35,8 @@ class AiRecognitionRepository(
         }
         OkHttpClient.Builder()
             .addInterceptor(logging)
-            .connectTimeout(45, TimeUnit.SECONDS)
-            .readTimeout(45, TimeUnit.SECONDS)
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
             .build()
     }
 
@@ -53,41 +51,52 @@ class AiRecognitionRepository(
                 ?: return@withContext AiRecognitionOutcome.Error("No se pudo leer la imagen")
 
             val outputStream = ByteArrayOutputStream()
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 85, outputStream)
+            // Reducción eficiente para que la API responda a máxima velocidad
+            val maxDimension = 1024
+            val scale = if (bitmap.width > maxDimension || bitmap.height > maxDimension) {
+                val ratio = maxDimension.toFloat() / maxOf(bitmap.width, bitmap.height)
+                Bitmap.createScaledBitmap(bitmap, (bitmap.width * ratio).toInt(), (bitmap.height * ratio).toInt(), true)
+            } else {
+                bitmap
+            }
+            scale.compress(Bitmap.CompressFormat.JPEG, 80, outputStream)
             val base64Image = Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
 
             val prompt = """
-                Eres un experto mundial en filatelia. Analiza minuciosamente este sello postal (ej: Deutsche Bundespost, Berlín, RDA, PFA, Alemania, etc.).
-                Extrae con precisión:
-                1. country: País o entidad emisora oficial (ej. "Alemania (Deutsche Bundespost)", "Alemania (Berlín)", "RDA", "México").
-                2. era: Época estimada (ej. "1990-1999", "República Federal").
-                3. issueYearEstimate: Año de emisión estimado (número entero, ej. 1991).
-                4. faceValue: Valor facial completo y moneda (ej. "100 Pf", "80 Pf").
-                5. series: Serie o emisión temática si aplica (ej. "Exposición Filatélica Internacional Berlín 1991", "Telecomunicaciones").
-                6. condition: Estado aparente ("Usado / Matasellado", "Nuevo con goma").
-                7. rarity: Rareza ("Común", "Escaso", "Raro").
-                8. motif: Motivo o diseño ilustrado (ej. gráficos bursátiles, antenas, carruajes).
-                9. historicalNote: Breve contexto histórico.
-                10. catalogMichelNumber: Referencia estimada de catálogo Michel (ej. "MiNr. 1520").
-                11. catalogScottNumber: Referencia Scott estimada.
-                12. catalogYvertNumber: Referencia Yvert estimada.
-                13. confidence: Grado de certeza de 0.0 a 1.0.
+                Eres un experto filatélico mundial y tasador profesional de sellos postales. Analiza minuciosamente la imagen del sello adjunto.
+                
+                Extrae o deduce con máxima precisión:
+                1. country: País emisor o entidad oficial (ej. "Alemania (Deutsche Bundespost)", "Alemania (Berlín Oeste)", "Alemania (RDA)", "México").
+                2. era: Periodo histórico (ej. "1970-1979", "República Federal").
+                3. issueYearEstimate: Año exacto o aproximado de emisión (entero).
+                4. faceValue: Valor facial exacto y moneda (ej. "50+25 Pf", "80 Pf").
+                5. series: Nombre de la serie o temática oficial.
+                6. condition: Estado de conservación (ej. "Usado / Matasellado", "Nuevo / Mint Never Hinged").
+                7. rarity: Rareza filatélica ("Común", "Escaso", "Raro", "Pieza de Museo").
+                8. motif: Descripción detallada del diseño o conmemoración.
+                9. historicalNote: Nota histórica y contexto de la emisión.
+                10. estimatedMarketValue: Rango de precio comercial estimado en el mercado filatélico actual (ej. "$0.50 - $1.50 USD", "€2.00 - €5.00 EUR").
+                11. catalogMichelNumber: Código de Catálogo Michel si aplica (ej. "MiNr. 1024").
+                12. catalogScottNumber: Código Catálogo Scott si aplica.
+                13. catalogYvertNumber: Código Catálogo Yvert si aplica.
+                14. confidence: Flotante entre 0.0 y 1.0 indicando nivel de certeza.
 
-                Devuelve EXCLUSIVAMENTE este JSON:
+                Devuelve EXCLUSIVAMENTE un JSON válido con esta estructura:
                 {
                   "country": "...",
                   "era": "...",
-                  "issueYearEstimate": 1991,
+                  "issueYearEstimate": 1979,
                   "faceValue": "...",
                   "series": "...",
                   "condition": "...",
                   "rarity": "...",
                   "motif": "...",
                   "historicalNote": "...",
+                  "estimatedMarketValue": "...",
                   "catalogMichelNumber": "...",
                   "catalogScottNumber": "...",
                   "catalogYvertNumber": "...",
-                  "confidence": 0.90
+                  "confidence": 0.95
                 }
             """.trimIndent()
 
@@ -106,42 +115,22 @@ class AiRecognitionRepository(
             val jsonBody = json.encodeToString(GeminiRequest.serializer(), requestPayload)
             val mediaType = "application/json; charset=utf-8".toMediaType()
 
-            // 1. Descubrimiento automático de modelos habilitados para tu API Key
-            val dynamicModels = mutableListOf<String>()
-            try {
-                val listReq = Request.Builder()
-                    .url("https://generativelanguage.googleapis.com/v1beta/models?key=$key")
-                    .addHeader("x-goog-api-key", key)
-                    .get()
-                    .build()
-                val listRes = httpClient.newCall(listReq).execute()
-                val listBody = listRes.body?.string().orEmpty()
-                if (listRes.isSuccessful && listBody.isNotBlank()) {
-                    val root = json.parseToJsonElement(listBody).jsonObject
-                    val modelsArray = root["models"]?.jsonArray
-                    modelsArray?.forEach { modelElem ->
-                        val modelObj = modelElem.jsonObject
-                        val name = modelObj["name"]?.jsonPrimitive?.content
-                        val methods = modelObj["supportedGenerationMethods"]?.jsonArray?.map { it.jsonPrimitive.content }
-                        if (name != null && methods?.contains("generateContent") == true) {
-                            dynamicModels.add("https://generativelanguage.googleapis.com/v1beta/$name:generateContent?key=$key")
-                        }
-                    }
-                }
-            } catch (_: Exception) {}
-
-            // 2. Lista de respaldo con versiones fijas y recientes
-            val staticEndpoints = listOf(
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$key",
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-001:generateContent?key=$key",
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-002:generateContent?key=$key",
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=$key"
+            // Cascada de modelos gratuitos de Gemini con rotación automática ante cuota excedida (429) o fallos
+            val freeModelsCascade = listOf(
+                "gemini-2.0-flash",
+                "gemini-1.5-flash-8b",
+                "gemini-1.5-flash",
+                "gemini-2.0-flash-lite-preview-02-05",
+                "gemini-1.5-flash-001",
+                "gemini-1.5-flash-002",
+                "gemini-1.5-pro",
+                "gemini-pro-vision"
             )
 
-            val allEndpoints = (dynamicModels + staticEndpoints).distinct()
+            var lastErrorMessage = ""
 
-            var lastError = ""
-            for (url in allEndpoints) {
+            for (model in freeModelsCascade) {
+                val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$key"
                 try {
                     val httpRequest = Request.Builder()
                         .url(url)
@@ -161,18 +150,21 @@ class AiRecognitionRepository(
                             return@withContext AiRecognitionOutcome.Success(parsed)
                         }
                     } else if (response.code == 429) {
-                        return@withContext AiRecognitionOutcome.RateLimited
+                        // Cuota excedida en este modelo: salta al siguiente modelo gratuito de la lista
+                        lastErrorMessage = "Cuota excedida en $model, intentando modelo alternativo..."
+                        delay(200)
+                        continue
                     } else {
-                        lastError = "HTTP ${response.code}: $responseBody"
+                        lastErrorMessage = "Modelo $model falló (HTTP ${response.code})"
                     }
                 } catch (e: Exception) {
-                    lastError = e.message ?: "Error de conexión"
+                    lastErrorMessage = e.message ?: "Error de red"
                 }
             }
 
-            AiRecognitionOutcome.Error("Detalle: $lastError")
+            AiRecognitionOutcome.Error("Todos los modelos gratuitos estaban ocupados. Intenta de nuevo en unos segundos.")
         } catch (e: Exception) {
-            AiRecognitionOutcome.Error(e.message ?: "Error desconocido al procesar con IA")
+            AiRecognitionOutcome.Error(e.message ?: "Error inesperado durante el reconocimiento")
         }
     }
 }
