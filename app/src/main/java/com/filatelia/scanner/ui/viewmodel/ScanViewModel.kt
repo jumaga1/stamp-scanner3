@@ -10,6 +10,7 @@ import com.filatelia.scanner.ai.StampRecognitionResult
 import com.filatelia.scanner.data.StampEntity
 import com.filatelia.scanner.data.StampRepository
 import com.filatelia.scanner.duplicate.DuplicateCheckResult
+import com.filatelia.scanner.duplicate.DuplicateConfidence
 import com.filatelia.scanner.duplicate.DuplicateDetector
 import com.filatelia.scanner.imageprocessing.ImagePreprocessor
 import com.filatelia.scanner.imageprocessing.PerceptualHash
@@ -43,10 +44,7 @@ data class ScanUiState(
 
 class ScanViewModel(
     private val stampRepository: StampRepository,
-    private val aiRepository: AiRecognitionRepository,
-    private val duplicateDetector: DuplicateDetector = DuplicateDetector(),
-    private val imagePreprocessor: ImagePreprocessor = ImagePreprocessor(),
-    private val perceptualHash: PerceptualHash = PerceptualHash()
+    private val aiRepository: AiRecognitionRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ScanUiState())
@@ -56,17 +54,17 @@ class ScanViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(step = ScanStep.Preprocessing, rawImageFile = file) }
 
-            val prepResult = imagePreprocessor.preprocess(file)
-            if (prepResult.file == null) {
+            val prepResult = ImagePreprocessor.preprocess(file)
+            if (!prepResult.isSuccess || prepResult.outputFile == null) {
                 _uiState.update {
                     it.copy(step = ScanStep.Error(prepResult.errorMessage ?: "Error al procesar la imagen."))
                 }
                 return@launch
             }
 
-            val processedFile = prepResult.file
+            val processedFile = prepResult.outputFile
             val bitmap = BitmapFactory.decodeFile(processedFile.absolutePath)
-            val hash = perceptualHash.compute(bitmap)
+            val hash = PerceptualHash.compute(bitmap)
 
             _uiState.update {
                 it.copy(
@@ -84,25 +82,14 @@ class ScanViewModel(
                 emptyList()
             }
 
-            val candidateEntity = StampEntity(
-                imagePath = processedFile.absolutePath,
-                perceptualHash = hash,
-                country = "",
-                era = "",
-                faceValue = "",
-                series = "",
-                condition = "",
-                rarity = "",
-                motif = "",
-                historicalNote = ""
+            val duplicateResult = DuplicateDetector.check(
+                candidateHash = hash,
+                candidateCountry = null,
+                candidateFaceValue = null,
+                existing = existingStamps
             )
 
-            val duplicateResult = duplicateDetector.check(
-                candidate = candidateEntity,
-                collection = existingStamps
-            )
-
-            if (duplicateResult.isDuplicate) {
+            if (duplicateResult.confidence != DuplicateConfidence.NINGUNO) {
                 _uiState.update {
                     it.copy(
                         duplicateResult = duplicateResult,
