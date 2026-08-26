@@ -242,8 +242,12 @@ private fun DuplicateWarningView(
             Text(message, style = MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.height(20.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) { Text("Descartar") }
-                Button(onClick = onContinueAnyway, modifier = Modifier.weight(1f)) { Text("Continuar") }
+                OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) {
+                    Text("Descartar")
+                }
+                Button(onClick = onContinueAnyway, modifier = Modifier.weight(1f)) {
+                    Text("Continuar")
+                }
             }
         }
     }
@@ -284,6 +288,13 @@ private fun StampReviewForm(
                     contentDescription = "Sello escaneado",
                     modifier = Modifier.fillMaxWidth().height(240.dp)
                 )
+            }
+        }
+
+        uiState.aiUnavailableReason?.let { reason ->
+            Spacer(Modifier.height(8.dp))
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                Text(reason, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
             }
         }
 
