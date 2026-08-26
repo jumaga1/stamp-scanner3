@@ -57,7 +57,7 @@ class AiRecognitionRepository(
             val bitmap = BitmapFactory.decodeFile(imageFile.absolutePath)
                 ?: return@withContext AiRecognitionOutcome.Error("No se pudo leer el archivo de imagen capturado.")
 
-            // 1. Optimizar imagen para el envío multimodal a Gemini
+            // 1. Optimizar imagen
             val maxDimension = 1024
             val scaledBitmap = if (bitmap.width > maxDimension || bitmap.height > maxDimension) {
                 val ratio = maxDimension.toFloat() / maxOf(bitmap.width, bitmap.height)
@@ -120,14 +120,18 @@ class AiRecognitionRepository(
 
             val mediaType = "application/json; charset=utf-8".toMediaType()
 
-            // Endpoints con rutas v1 y v1beta para compatibilidad universal con cualquier API Key
-            val candidateEndpoints = listOf(
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent",
-                "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent",
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent",
-                "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-pro:generateContent"
-            )
+            // 3. Obtener dinámicamente los modelos activos para tu clave
+            val availableModels = fetchAvailableModels(apiKey)
+            val candidateEndpoints = if (availableModels.isNotEmpty()) {
+                availableModels.map { "https://generativelanguage.googleapis.com/v1beta/$it:generateContent" }
+            } else {
+                listOf(
+                    "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent",
+                    "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-8b:generateContent",
+                    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
+                    "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent"
+                )
+            }
 
             var lastErrorMessage = ""
 
@@ -174,6 +178,31 @@ class AiRecognitionRepository(
             AiRecognitionOutcome.Error("No se pudo identificar la estampilla: $lastErrorMessage")
         } catch (e: Exception) {
             AiRecognitionOutcome.Error("Error procesando la imagen con IA: ${e.message}")
+        }
+    }
+
+    private fun fetchAvailableModels(apiKey: String): List<String> {
+        return try {
+            val url = "https://generativelanguage.googleapis.com/v1beta/models?key=$apiKey"
+            val request = Request.Builder().url(url).build()
+            val response = httpClient.newCall(request).execute()
+            val body = response.body?.string().orEmpty()
+
+            if (response.isSuccessful && body.isNotBlank()) {
+                val root = json.parseToJsonElement(body).jsonObject
+                val modelsArray = root["models"]?.jsonArray ?: return emptyList()
+                
+                modelsArray.mapNotNull { modelElement ->
+                    val obj = modelElement.jsonObject
+                    val name = obj["name"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                    val methods = obj["supportedGenerationMethods"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
+                    if (methods.contains("generateContent") && name.contains("gemini")) name else null
+                }
+            } else {
+                emptyList()
+            }
+        } catch (_: Exception) {
+            emptyList()
         }
     }
 
