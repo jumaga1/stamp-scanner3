@@ -81,8 +81,7 @@ fun AppNavigation(
                 // 1. Pantalla de Bienvenida Principal
                 composable(Screen.Welcome.route) {
                     WelcomeScreen(
-                        onStartScan = { navController.navigate(Screen.Scan.route) },
-                        onViewCollection = { navController.navigate(Screen.Collection.route) }
+                        onStartClick = { navController.navigate(Screen.Scan.route) }
                     )
                 }
 
