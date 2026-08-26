@@ -58,7 +58,7 @@ class AiRecognitionRepository(
                 ?: return@withContext AiRecognitionOutcome.Error("No se pudo leer el archivo de imagen capturado.")
 
             // 1. Optimizar imagen para el envío multimodal a Gemini
-            val maxDimension = 1200
+            val maxDimension = 1024
             val scaledBitmap = if (bitmap.width > maxDimension || bitmap.height > maxDimension) {
                 val ratio = maxDimension.toFloat() / maxOf(bitmap.width, bitmap.height)
                 Bitmap.createScaledBitmap(bitmap, (bitmap.width * ratio).toInt(), (bitmap.height * ratio).toInt(), true)
@@ -67,20 +67,20 @@ class AiRecognitionRepository(
             }
 
             val outputStream = ByteArrayOutputStream()
-            scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 90, outputStream)
+            scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 85, outputStream)
             val base64ImageData = Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
 
-            // 2. Prompt pericial filatélico estricto (cero falsificación de datos)
+            // 2. Prompt pericial filatélico estricto
             val promptText = """
                 Actúa como un perito filatélico y tasador profesional de sellos postales internacionales.
                 Analiza exhaustivamente la imagen del timbre/estampilla postal adjunta.
                 
-                Instrucciones de análisis visual:
-                1. Examina minuciosamente el país emisor, texto, idioma, valor facial, sobretasa (si tiene "+"), año impreso, temática o personaje retratado y diseño general.
-                2. Si la imagen muestra una estampilla real, determina con máxima precisión histórica y catalográfica sus datos reales (Catálogo Michel, Scott, Yvert, año exacto de emisión, serie oficial y valor de mercado estimado).
-                3. Si la imagen no contiene una estampilla identificable, está ilegible o es un objeto diferente, devuélvelo en el JSON indicando "No identificado" sin inventar datos.
+                Instrucciones:
+                1. Examina el país emisor, texto, idioma, valor facial, sobretasa (si tiene "+"), año impreso, temática, personaje y diseño general.
+                2. Determina con máxima precisión catalográfica: Catálogo Michel, Scott, Yvert, año exacto de emisión, serie oficial y valor de mercado estimado.
+                3. Si la imagen no contiene una estampilla identificable o está ilegible, indícalo de forma veraz sin inventar datos.
                 
-                Responde ÚNICAMENTE un objeto JSON válido con este formato:
+                Responde ÚNICAMENTE un objeto JSON válido con esta estructura exacta:
                 {
                   "country": "Nombre exacto del país o entidad emisora",
                   "era": "Periodo o década (ej. 1980 - 1989)",
@@ -89,9 +89,9 @@ class AiRecognitionRepository(
                   "series": "Nombre oficial de la serie o motivo de emisión",
                   "condition": "Usado / Matasellado o Nuevo / Mint",
                   "rarity": "Común, Escaso, Raro o Muy Raro",
-                  "motif": "Descripción exacta y fidedigna de la ilustración, personaje, monumento o evento conmemorativo",
+                  "motif": "Descripción exacta de la ilustración o personaje",
                   "historicalNote": "Reseña histórica real y contexto de la emisión postal",
-                  "estimatedMarketValue": "Valor de mercado filatélico estimado (ej. $0.50 - $2.00 USD)",
+                  "estimatedMarketValue": "Valor estimado (ej. $0.50 - $2.00 USD)",
                   "catalogMichelNumber": "Código Michel (MiNr.)",
                   "catalogScottNumber": "Código Scott",
                   "catalogYvertNumber": "Código Yvert",
@@ -115,17 +115,25 @@ class AiRecognitionRepository(
                 })
                 put("generationConfig", buildJsonObject {
                     put("responseMimeType", "application/json")
-                    put("temperature", 0.1)
                 })
             }.toString()
 
             val mediaType = "application/json; charset=utf-8".toMediaType()
-            val candidateModels = listOf("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash")
+
+            // Endpoints con rutas v1 y v1beta para compatibilidad universal con cualquier API Key
+            val candidateEndpoints = listOf(
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent",
+                "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent",
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent",
+                "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-pro:generateContent"
+            )
+
             var lastErrorMessage = ""
 
-            for (model in candidateModels) {
+            for (baseUrl in candidateEndpoints) {
                 try {
-                    val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
+                    val url = "$baseUrl?key=$apiKey"
                     val request = Request.Builder()
                         .url(url)
                         .addHeader("x-goog-api-key", apiKey)
@@ -150,7 +158,6 @@ class AiRecognitionRepository(
 
                             val parsed = json.decodeFromString(StampRecognitionResult.serializer(), cleanJson)
                             
-                            // Buscar imagen oficial en alta resolución del motivo detectado
                             val hdReferenceUrl = fetchHdStampImage("${parsed.motif ?: ""} ${parsed.country ?: ""}")
                             return@withContext AiRecognitionOutcome.Success(
                                 parsed.copy(referenceImageUrl = hdReferenceUrl)
@@ -160,7 +167,7 @@ class AiRecognitionRepository(
                         lastErrorMessage = "HTTP ${response.code}: $bodyString"
                     }
                 } catch (e: Exception) {
-                    lastErrorMessage = e.message ?: "Error de conexión con la IA"
+                    lastErrorMessage = e.message ?: "Error de red"
                 }
             }
 
