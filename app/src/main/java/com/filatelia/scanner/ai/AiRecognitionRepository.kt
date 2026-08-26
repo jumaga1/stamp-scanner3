@@ -3,11 +3,12 @@ package com.filatelia.scanner.ai
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Base64
+import com.filatelia.scanner.BuildConfig
+import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 import okhttp3.MediaType.Companion.toMediaType
@@ -24,7 +25,14 @@ class AiRecognitionRepository(
     private val apiKeyOverride: String? = null
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
-    private val textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+    private val textRecognizer by lazy { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
+
+    private val effectiveApiKey: String
+        get() = when {
+            !apiKeyOverride.isNullOrBlank() -> apiKeyOverride
+            BuildConfig.AI_API_KEY.isNotBlank() -> BuildConfig.AI_API_KEY
+            else -> "AQ.Ab8RN6KqD2wgAw69n4UdJks6mqCpCi_bXLvCHlZT7aONEI19xQ"
+        }
 
     private val httpClient: OkHttpClient by lazy {
         val logging = HttpLoggingInterceptor().apply {
@@ -42,10 +50,10 @@ class AiRecognitionRepository(
             val bitmap = BitmapFactory.decodeFile(imageFile.absolutePath)
                 ?: return@withContext AiRecognitionOutcome.Error("No se pudo cargar la imagen")
 
-            // 1. ANÁLISIS OCR DIRECTO DE TEXTOS EN EL SELLO
+            // 1. ANÁLISIS OCR DIRECTO EN EL DISPOSITIVO
             val ocrText = try {
                 val inputImage = InputImage.fromBitmap(bitmap, 0)
-                val visionText = textRecognizer.process(inputImage).await()
+                val visionText = Tasks.await(textRecognizer.process(inputImage), 5, TimeUnit.SECONDS)
                 visionText.text.replace("\n", " ").trim()
             } catch (_: Exception) {
                 ""
@@ -91,7 +99,7 @@ class AiRecognitionRepository(
                 else -> 1972
             }
 
-            // 3. INTENTO DE RECONOCIMIENTO CON IA EN LA NUBE (SI ESTÁ DISPONIBLE)
+            // 3. INTENTO DE RECONOCIMIENTO CON IA EN LA NUBE
             var cloudResult: StampRecognitionResult? = null
             try {
                 val outputStream = ByteArrayOutputStream()
@@ -99,7 +107,7 @@ class AiRecognitionRepository(
                 scale.compress(Bitmap.CompressFormat.JPEG, 80, outputStream)
                 val base64Image = Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
 
-                val prompt = "Analiza el sello postal. OCR texto: '$ocrText'. Devuelve JSON: {\"country\":\"...\",\"era\":\"...\",\"issueYearEstimate\":1972,\"faceValue\":\"$faceValue\",\"series\":\"...\",\"condition\":\"Usado\",\"rarity\":\"Común\",\"motif\":\"$detectedMotif\",\"historicalNote\":\"...\",\"estimatedMarketValue\":\"$0.50 - $1.50 USD\",\"catalogMichelNumber\":\"MiNr. 718\",\"catalogScottNumber\":\"Scott 1085\",\"catalogYvertNumber\":\"Yvert 580\",\"confidence\":0.95}"
+                val prompt = "Analiza el sello postal. OCR texto: '$ocrText'. Devuelve JSON con: country, era, issueYearEstimate, faceValue, series, condition, rarity, motif, historicalNote, estimatedMarketValue, catalogMichelNumber, catalogScottNumber, catalogYvertNumber, confidence."
 
                 val payload = buildJsonObject {
                     put("contents", buildJsonArray {
@@ -119,8 +127,9 @@ class AiRecognitionRepository(
 
                 val mediaType = "application/json; charset=utf-8".toMediaType()
                 val request = Request.Builder()
-                    .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=AQ.Ab8RN6KqD2wgAw69n4UdJks6mqCpCi_bXLvCHlZT7aONEI19xQ")
-                    .addHeader("Authorization", "Bearer AQ.Ab8RN6KqD2wgAw69n4UdJks6mqCpCi_bXLvCHlZT7aONEI19xQ")
+                    .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$effectiveApiKey")
+                    .addHeader("Authorization", "Bearer $effectiveApiKey")
+                    .addHeader("x-goog-api-key", effectiveApiKey)
                     .post(payload.toRequestBody(mediaType))
                     .build()
 
@@ -138,7 +147,7 @@ class AiRecognitionRepository(
                 }
             } catch (_: Exception) {}
 
-            // 4. BÚSQUEDA AUTOMÁTICA DE LA IMAGEN HD EN WIKIMEDIA COMMONS
+            // 4. BÚSQUEDA DE IMAGEN HD EN WIKIMEDIA
             val finalMotif = cloudResult?.motif ?: detectedMotif
             val hdUrl = fetchHdStampImage("$finalMotif Briefmarke")
 
