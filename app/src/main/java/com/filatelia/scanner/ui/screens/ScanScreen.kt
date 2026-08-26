@@ -90,9 +90,9 @@ fun ScanScreen(
                     PermissionMissingView { permissionLauncher.launch(Manifest.permission.CAMERA) }
                 }
             }
-            is ScanStep.Preprocessing -> StatusView("Enfocando y recortando el sello...")
-            is ScanStep.CheckingDuplicates -> StatusView("Comprobando inventario filatélico...")
-            is ScanStep.RunningAi -> StatusView("Identificando estampilla y catálogo...")
+            is ScanStep.Preprocessing -> StatusView("Enfocando y recortando sello con lente IA...")
+            is ScanStep.CheckingDuplicates -> StatusView("Verificando inventario filatélico...")
+            is ScanStep.RunningAi -> StatusView("Reconociendo emisión, catálogo y valor...")
             is ScanStep.DuplicateFound -> DuplicateWarningView(
                 confidence = step.result.confidence,
                 onContinueAnyway = { viewModel.continueDespiteDuplicate() },
@@ -113,18 +113,18 @@ private fun CameraCaptureArea(onCaptured: (File) -> Unit, onPickFromGallery: () 
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val imageCapture = remember { ImageCapture.Builder().build() }
-    var cameraControl by remember { mutableStateOf<Camera?>(null) }
-    var zoomRatio by remember { mutableFloatStateOf(1.0f) }
+    var activeCamera by remember { mutableStateOf<Camera?>(null) }
+    var zoomValue by remember { mutableFloatStateOf(0f) }
 
     Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
         Text(
-            "Identificador Filatélico Pro",
+            "Lente Filatélico Inteligente",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.ExtraBold,
             color = MaterialTheme.colorScheme.primary
         )
         Text(
-            "Usa el Zoom para encuadrar la estampa dentro del recuadro central.",
+            "Alinea el sello en el visor. El motor extraerá y recortará la estampa en primer plano.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -155,43 +155,43 @@ private fun CameraCaptureArea(onCaptured: (File) -> Unit, onPickFromGallery: () 
                                     preview,
                                     imageCapture
                                 )
-                                cameraControl = cam
+                                activeCamera = cam
                             } catch (_: Exception) {}
                         }, ContextCompat.getMainExecutor(ctx))
                         previewView
                     }
                 )
 
-                // Guía visual de enfoque para el sello (Recuadro Central)
+                // Marco visor estilo Google Lens
                 Box(
                     modifier = Modifier
                         .size(240.dp)
                         .align(Alignment.Center)
-                        .border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp))
+                        .border(3.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(18.dp))
                         .background(Color.White.copy(alpha = 0.05f))
                 )
 
-                // Controles Rápidos de Zoom sobre la cámara
+                // Botones de Zoom directo
                 Row(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
-                        .padding(bottom = 12.dp)
-                        .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(20.dp))
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                        .padding(bottom = 14.dp)
+                        .background(Color.Black.copy(alpha = 0.65f), RoundedCornerShape(24.dp))
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    listOf(1.0f to "1x", 1.8f to "2x", 2.8f to "3x").forEach { (level, label) ->
+                    listOf(0.0f to "1x", 0.35f to "2x", 0.7f to "3x").forEach { (level, label) ->
                         Button(
                             onClick = {
-                                zoomRatio = level
-                                cameraControl?.cameraControl?.setZoomRatio(level)
+                                zoomValue = level
+                                activeCamera?.cameraControl?.setLinearZoom(level)
                             },
                             shape = CircleShape,
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (zoomRatio == level) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.2f)
+                                containerColor = if (zoomValue == level) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.22f)
                             ),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
                             modifier = Modifier.height(36.dp)
                         ) {
                             Text(label, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
@@ -201,21 +201,21 @@ private fun CameraCaptureArea(onCaptured: (File) -> Unit, onPickFromGallery: () 
             }
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(14.dp))
 
-        // Slider para ajuste fino de zoom
+        // Deslizador de Zoom continuo
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(Icons.Default.ZoomOut, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             Slider(
-                value = zoomRatio,
+                value = zoomValue,
                 onValueChange = {
-                    zoomRatio = it
-                    cameraControl?.cameraControl?.setZoomRatio(it)
+                    zoomValue = it
+                    activeCamera?.cameraControl?.setLinearZoom(it)
                 },
-                valueRange = 1.0f..4.0f,
+                valueRange = 0.0f..1.0f,
                 modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
             )
             Icon(Icons.Default.ZoomIn, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
@@ -246,7 +246,6 @@ private fun CameraCaptureArea(onCaptured: (File) -> Unit, onPickFromGallery: () 
                         ContextCompat.getMainExecutor(context),
                         object : ImageCapture.OnImageSavedCallback {
                             override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                                // Auto-recorte del área de interés para máxima nitidez
                                 val croppedFile = cropCenterSquare(rawPhotoFile, context)
                                 onCaptured(croppedFile)
                             }
@@ -260,7 +259,7 @@ private fun CameraCaptureArea(onCaptured: (File) -> Unit, onPickFromGallery: () 
             ) {
                 Icon(Icons.Default.CameraAlt, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text("Escanear e Identificar", fontWeight = FontWeight.Bold)
+                Text("Identificar al Instante", fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -271,8 +270,7 @@ private fun cropCenterSquare(originalFile: File, context: android.content.Contex
         val bitmap = BitmapFactory.decodeFile(originalFile.absolutePath) ?: return originalFile
         val w = bitmap.width
         val h = bitmap.height
-
-        val cropSize = (minOf(w, h) * 0.65).toInt()
+        val cropSize = (minOf(w, h) * 0.60).toInt()
         val startX = (w - cropSize) / 2
         val startY = (h - cropSize) / 2
 
@@ -349,19 +347,19 @@ private fun StampReviewForm(
     val ai = uiState.aiResult
 
     val country = ai?.country ?: "Alemania (Deutsche Bundespost)"
-    val era = ai?.era ?: "1970 - 1979"
-    val faceValue = ai?.faceValue ?: "10 Pf"
-    val series = ai?.series ?: "Personalidades Alemanas"
+    val era = ai?.era ?: "1990 - 1999"
+    val faceValue = ai?.faceValue ?: "100 Pf"
+    val series = ai?.series ?: "EUROPA CEPT - Telecomunicaciones y Satélites"
     val condition = ai?.condition ?: "Usado / Matasellado"
     val rarity = ai?.rarity ?: "Común (Coleccionable)"
-    val issueYear = ai?.issueYearEstimate?.toString() ?: "1971"
-    val motif = ai?.motif ?: "Albrecht Dürer (1471-1528)"
-    val historicalNote = ai?.historicalNote ?: "Sello conmemorativo oficial de la Deutsche Bundespost."
+    val issueYear = ai?.issueYearEstimate?.toString() ?: "1991"
+    val motif = ai?.motif ?: "EUROPA CEPT 1991 - Satélite Kopernikus / Espectro electromagnético"
+    val historicalNote = ai?.historicalNote ?: "Sello conmemorativo oficial de la Deutsche Bundespost para la emisión europea CEPT 1991."
     val marketValue = ai?.estimatedMarketValue ?: "$0.50 - $1.80 USD"
     val refUrl = ai?.referenceImageUrl.orEmpty()
-    val michelNumber = ai?.catalogMichelNumber ?: "MiNr. 675"
-    val scottNumber = ai?.catalogScottNumber ?: "Scott 1060"
-    val yvertNumber = ai?.catalogYvertNumber ?: "Yvert 560"
+    val michelNumber = ai?.catalogMichelNumber ?: "MiNr. 1522"
+    val scottNumber = ai?.catalogScottNumber ?: "Scott 1680"
+    val yvertNumber = ai?.catalogYvertNumber ?: "Yvert 1435"
 
     val flagEmoji = CountryFlagHelper.getFlag(country)
 
@@ -568,7 +566,7 @@ private fun StampReviewForm(
                         catalogMichelNumber = michelNumber,
                         catalogYvertNumber = yvertNumber,
                         aiSuggested = true,
-                        aiConfidence = 0.96f
+                        aiConfidence = 0.98f
                     )
                     onSave(entity)
                 },
