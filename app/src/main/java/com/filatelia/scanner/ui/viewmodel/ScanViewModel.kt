@@ -9,28 +9,25 @@ import com.filatelia.scanner.ai.AiRecognitionRepository
 import com.filatelia.scanner.ai.StampRecognitionResult
 import com.filatelia.scanner.data.StampEntity
 import com.filatelia.scanner.data.StampRepository
-import com.filatelia.scanner.duplicate.DuplicateConfidence
+import com.filatelia.scanner.duplicate.DuplicateCheckResult
 import com.filatelia.scanner.duplicate.DuplicateDetector
-import com.filatelia.scanner.duplicate.DuplicateResult
 import com.filatelia.scanner.imageprocessing.ImagePreprocessor
 import com.filatelia.scanner.imageprocessing.PerceptualHash
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.File
 
-sealed interface ScanStep {
-    data object Idle : ScanStep
-    data object Preprocessing : ScanStep
-    data object CheckingDuplicates : ScanStep
-    data object RunningAi : ScanStep
-    data class DuplicateFound(val result: DuplicateResult) : ScanStep
-    data object ReadyToSave : ScanStep
-    data class Error(val message: String) : ScanStep
+sealed class ScanStep {
+    object Idle : ScanStep()
+    object Preprocessing : ScanStep()
+    object CheckingDuplicates : ScanStep()
+    data class DuplicateFound(val result: DuplicateCheckResult) : ScanStep()
+    object RunningAi : ScanStep()
+    object ReadyToSave : ScanStep()
+    data class Error(val message: String) : ScanStep()
 }
 
 data class ScanUiState(
@@ -39,14 +36,16 @@ data class ScanUiState(
     val processedImageFile: File? = null,
     val processedBitmap: Bitmap? = null,
     val perceptualHash: String? = null,
-    val duplicateResult: DuplicateResult? = null,
-    val aiResult: StampRecognitionResult? = null,
-    val aiUnavailableReason: String? = null
+    val duplicateResult: DuplicateCheckResult? = null,
+    val aiResult: StampRecognitionResult? = null
 )
 
 class ScanViewModel(
     private val stampRepository: StampRepository,
-    private val aiRepository: AiRecognitionRepository
+    private val aiRepository: AiRecognitionRepository,
+    private val duplicateDetector: DuplicateDetector,
+    private val imagePreprocessor: ImagePreprocessor,
+    private val perceptualHash: PerceptualHash
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ScanUiState())
@@ -54,82 +53,81 @@ class ScanViewModel(
 
     fun onImageCaptured(file: File) {
         viewModelScope.launch {
-            _uiState.value = ScanUiState(step = ScanStep.Preprocessing, rawImageFile = file)
+            _uiState.update { it.copy(step = ScanStep.Preprocessing, rawImageFile = file) }
 
-            val preprocessed = withContext(Dispatchers.Default) {
-                ImagePreprocessor.preprocess(file)
+            val prepResult = imagePreprocessor.preprocess(file)
+            if (!prepResult.isSuccess || prepResult.outputFile == null) {
+                _uiState.update {
+                    it.copy(step = ScanStep.Error("Error al procesar la imagen capturada."))
+                }
+                return@launch
             }
-            val pHash = withContext(Dispatchers.Default) {
-                val bmp = BitmapFactory.decodeFile(preprocessed.absolutePath)
-                bmp?.let { PerceptualHash.compute(it) } ?: ""
-            }
 
-            _uiState.value = _uiState.value.copy(
-                processedImageFile = preprocessed,
-                processedBitmap = BitmapFactory.decodeFile(preprocessed.absolutePath),
-                perceptualHash = pHash,
-                step = ScanStep.CheckingDuplicates
-            )
+            val processedFile = prepResult.outputFile
+            val bitmap = BitmapFactory.decodeFile(processedFile.absolutePath)
+            val hash = perceptualHash.compute(bitmap)
 
-            val existing: List<StampEntity> = stampRepository.stamps.firstOrNull() ?: emptyList()
-
-            val candidate = StampEntity(
-                imagePath = preprocessed.absolutePath,
-                perceptualHash = pHash
-            )
-            val dup = DuplicateDetector.check(candidate, existing)
-
-            if (dup.confidence == DuplicateConfidence.CASI_SEGURO || dup.confidence == DuplicateConfidence.PROBABLE) {
-                _uiState.value = _uiState.value.copy(
-                    duplicateResult = dup,
-                    step = ScanStep.DuplicateFound(dup)
+            _uiState.update {
+                it.copy(
+                    processedImageFile = processedFile,
+                    processedBitmap = bitmap,
+                    perceptualHash = hash,
+                    step = ScanStep.CheckingDuplicates
                 )
+            }
+
+            // Comprobación de duplicados en la colección
+            val existingStamps = stampRepository.getAllSync()
+            val duplicateResult = duplicateDetector.check(
+                candidateHash = hash,
+                candidateCountry = null,
+                candidateFaceValue = null,
+                existing = existingStamps
+            )
+
+            if (duplicateResult.isDuplicate) {
+                _uiState.update {
+                    it.copy(
+                        duplicateResult = duplicateResult,
+                        step = ScanStep.DuplicateFound(duplicateResult)
+                    )
+                }
             } else {
-                runAiRecognition(preprocessed)
+                runAiAnalysis(processedFile)
             }
         }
     }
 
     fun continueDespiteDuplicate() {
         val file = _uiState.value.processedImageFile ?: return
-        runAiRecognition(file)
+        runAiAnalysis(file)
     }
 
-    private fun runAiRecognition(file: File) {
+    private fun runAiAnalysis(file: File) {
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(step = ScanStep.RunningAi)
+            _uiState.update { it.copy(step = ScanStep.RunningAi) }
+
             when (val outcome = aiRepository.recognize(file)) {
                 is AiRecognitionOutcome.Success -> {
-                    _uiState.value = _uiState.value.copy(
-                        aiResult = outcome.result,
-                        step = ScanStep.ReadyToSave
-                    )
-                }
-                is AiRecognitionOutcome.RateLimited -> {
-                    _uiState.value = _uiState.value.copy(
-                        aiUnavailableReason = "Límite de consultas de IA alcanzado por hoy.",
-                        step = ScanStep.ReadyToSave
-                    )
-                }
-                is AiRecognitionOutcome.OfflineFallback -> {
-                    _uiState.value = _uiState.value.copy(
-                        aiUnavailableReason = "Sin conexión a internet para IA.",
-                        step = ScanStep.ReadyToSave
-                    )
+                    _uiState.update {
+                        it.copy(
+                            aiResult = outcome.result,
+                            step = ScanStep.ReadyToSave
+                        )
+                    }
                 }
                 is AiRecognitionOutcome.Error -> {
-                    _uiState.value = _uiState.value.copy(
-                        aiUnavailableReason = "No se pudo consultar la IA: ${outcome.message}",
-                        step = ScanStep.ReadyToSave
-                    )
+                    _uiState.update {
+                        it.copy(step = ScanStep.Error(outcome.message))
+                    }
                 }
             }
         }
     }
 
-    fun saveStamp(entity: StampEntity, onSaved: () -> Unit) {
+    fun saveStamp(stamp: StampEntity, onSaved: () -> Unit) {
         viewModelScope.launch {
-            stampRepository.insert(entity)
+            stampRepository.insert(stamp)
             reset()
             onSaved()
         }
