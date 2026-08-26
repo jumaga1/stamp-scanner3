@@ -1,6 +1,5 @@
 package com.filatelia.scanner.ui.screens
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -35,12 +34,11 @@ fun CollectionScreen(
     val stamps by viewModel.stamps.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
 
-    // AGRUPACIÓN: 1° por País -> 2° por Año
     val groupedStamps = remember(stamps) {
         stamps.groupBy { it.country ?: "Sin País Asignado" }
             .mapValues { entry ->
                 entry.value.groupBy { it.issueYear ?: 0 }
-                    .toSortedMap(compareByDescending { it }) // Años más recientes primero
+                    .toSortedMap(compareByDescending { it })
             }
             .toSortedMap()
     }
@@ -59,7 +57,7 @@ fun CollectionScreen(
                     color = MaterialTheme.colorScheme.primary
                 )
                 Text(
-                    "${stamps.size} sellos catalogados en ${groupedStamps.size} países",
+                    "${stamps.size} sellos en ${groupedStamps.size} países",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -97,7 +95,6 @@ fun CollectionScreen(
                         val flag = CountryFlagHelper.getFlag(country)
                         val totalInCountry = yearsMap.values.sumOf { it.size }
 
-                        // TARJETA DE CABECERA DE PAÍS
                         Card(
                             shape = RoundedCornerShape(16.dp),
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
@@ -132,7 +129,6 @@ fun CollectionScreen(
                         }
                     }
 
-                    // SECCIÓN POR AÑO
                     yearsMap.forEach { (year, stampList) ->
                         item {
                             val yearText = if (year > 0) "Año $year" else "Año no especificado"
@@ -161,7 +157,6 @@ fun CollectionScreen(
                             }
                         }
 
-                        // FILAS DE SELLOS (2 columnas manuales para LazyColumn fluida)
                         items(stampList.chunked(2)) { rowStamps ->
                             Row(
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -198,11 +193,14 @@ private fun StampCard(stamp: StampEntity, onClick: () -> Unit) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(130.dp)
+                    .height(135.dp)
                     .background(Color.Black.copy(alpha = 0.04f))
             ) {
+                // Prioriza la imagen HD oficial si está disponible; de lo contrario muestra la foto escaneada
+                val imageModel = stamp.referenceImageUrl?.ifBlank { null } ?: File(stamp.imagePath)
+
                 Image(
-                    painter = rememberAsyncImagePainter(File(stamp.imagePath)),
+                    painter = rememberAsyncImagePainter(model = imageModel),
                     contentDescription = stamp.motif ?: "Sello",
                     contentScale = ContentScale.Fit,
                     modifier = Modifier.fillMaxSize().padding(6.dp)
