@@ -4,10 +4,12 @@ import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.POST
 import retrofit2.http.Query
+import retrofit2.http.Url
 
 interface AiRecognitionService {
-    @POST("v1beta/models/gemini-1.5-flash:generateContent")
+    @POST
     suspend fun generateContent(
+        @Url url: String,
         @Query("key") apiKey: String,
         @Body request: GeminiRequest
     ): Response<GeminiResponse>
