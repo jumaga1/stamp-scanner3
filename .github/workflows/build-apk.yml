@@ -27,9 +27,7 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Build with Gradle in Subdirectory
-        # Reemplaza 'stamp-scanner3' por el nombre exacto de la subcarpeta si aplica
-        working-directory: ./stamp-scanner3
+      - name: Build Debug APK
         run: gradle assembleDebug --no-daemon --stacktrace
 
       - name: Upload Debug APK Artifact
