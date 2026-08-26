@@ -38,11 +38,10 @@ class AiRecognitionRepository(
             .readTimeout(45, TimeUnit.SECONDS)
             .build()
 
-        val baseUrl = BuildConfig.AI_API_BASE_URL.ifBlank { "https://generativelanguage.googleapis.com/" }
         val contentType = "application/json".toMediaType()
 
         Retrofit.Builder()
-            .baseUrl(baseUrl)
+            .baseUrl("https://generativelanguage.googleapis.com/")
             .client(client)
             .addConverterFactory(json.asConverterFactory(contentType))
             .build()
@@ -66,25 +65,25 @@ class AiRecognitionRepository(
             val prompt = """
                 Eres un experto mundial en filatelia. Analiza minuciosamente este sello postal (ej: Deutsche Bundespost, RDA, PFA, Alemania, etc.).
                 Extrae con precisión:
-                1. country: País o entidad emisora oficial (ej. "Alemania", "RDA", "México").
-                2. era: Época estimada (ej. "1960-1969", "República Federal").
-                3. issueYearEstimate: Año de emisión estimado (número entero, ej. 1976).
-                4. faceValue: Valor facial completo y moneda (ej. "40 Pf", "50 Céntimos").
-                5. series: Serie o emisión temática si aplica.
+                1. country: País o entidad emisora oficial (ej. "Alemania", "Alemania (Berlín Oeste)", "RDA", "México").
+                2. era: Época estimada (ej. "1970-1979", "República Federal").
+                3. issueYearEstimate: Año de emisión estimado (número entero, ej. 1978).
+                4. faceValue: Valor facial completo y moneda (ej. "80 Pf", "50 Céntimos").
+                5. series: Serie o emisión temática si aplica (ej. "Para el bienestar público - Carruajes").
                 6. condition: Estado aparente ("Usado / Matasellado", "Nuevo con goma").
                 7. rarity: Rareza ("Común", "Escaso", "Raro").
                 8. motif: Motivo o personaje que ilustra.
-                9. historicalNote: Breve resumen histórico.
-                10. catalogMichelNumber: Referencia estimada de catálogo Michel (ej. "MiNr. 814").
+                9. historicalNote: Breve resumen histórico del sello.
+                10. catalogMichelNumber: Referencia estimada de catálogo Michel (ej. "MiNr. 580").
                 11. catalogScottNumber: Referencia Scott estimada.
                 12. catalogYvertNumber: Referencia Yvert estimada.
-                13. confidence: Número de 0.0 a 1.0 indicando tu certeza.
+                13. confidence: Número flotante de 0.0 a 1.0 indicando certeza.
 
-                Devuelve EXCLUSIVAMENTE este formato JSON:
+                Devuelve EXCLUSIVAMENTE este JSON:
                 {
                   "country": "...",
                   "era": "...",
-                  "issueYearEstimate": 1976,
+                  "issueYearEstimate": 1978,
                   "faceValue": "...",
                   "series": "...",
                   "condition": "...",
@@ -110,12 +109,14 @@ class AiRecognitionRepository(
                 generationConfig = GenerationConfig("application/json")
             )
 
-            val response = service.generateContent(key, request)
+            val fullUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+            val response = service.generateContent(fullUrl, key, request)
+
             if (response.code() == 429) {
                 return@withContext AiRecognitionOutcome.RateLimited
             }
             if (!response.isSuccessful) {
-                return@withContext AiRecognitionOutcome.Error("Error HTTP ${response.code()}: ${response.message()}")
+                return@withContext AiRecognitionOutcome.Error("Error HTTP ${response.code()}: ${response.errorBody()?.string() ?: response.message()}")
             }
 
             val rawJson = response.body()?.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
@@ -125,7 +126,7 @@ class AiRecognitionRepository(
             val parsed = json.decodeFromString<StampRecognitionResult>(cleanedJson)
             AiRecognitionOutcome.Success(parsed)
         } catch (e: Exception) {
-            AiRecognitionOutcome.Error(e.message ?: "Error desconocido al contactar la IA")
+            AiRecognitionOutcome.Error(e.message ?: "Error desconocido al procesar con IA")
         }
     }
 }
