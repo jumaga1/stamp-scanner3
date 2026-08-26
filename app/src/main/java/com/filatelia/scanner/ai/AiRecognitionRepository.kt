@@ -2,6 +2,7 @@ package com.filatelia.scanner.ai
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.util.Base64
 import com.filatelia.scanner.BuildConfig
 import kotlinx.coroutines.Dispatchers
@@ -14,6 +15,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.logging.HttpLoggingInterceptor
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 class AiRecognitionRepository(
@@ -34,8 +36,8 @@ class AiRecognitionRepository(
         }
         OkHttpClient.Builder()
             .addInterceptor(logging)
-            .connectTimeout(40, TimeUnit.SECONDS)
-            .readTimeout(40, TimeUnit.SECONDS)
+            .connectTimeout(45, TimeUnit.SECONDS)
+            .readTimeout(45, TimeUnit.SECONDS)
             .build()
     }
 
@@ -53,24 +55,25 @@ class AiRecognitionRepository(
             } else {
                 bitmap
             }
-            scale.compress(Bitmap.CompressFormat.JPEG, 85, outputStream)
+            scale.compress(Bitmap.CompressFormat.JPEG, 90, outputStream)
             val base64Image = Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
 
             val prompt = """
-                Analiza el sello postal adjunto como experto filatélico.
-                Devuelve un JSON estrictamente estructurado:
+                Analiza como experto filatélico la imagen de este sello postal.
+                Lee con extremo cuidado los textos impresos en los bordes, el valor numérico, el personaje o motivo y el emisor (ej. "LUCAS CRANACH d. Ä. 1472", "DEUTSCHE BUNDESPOST", valor "25").
+                
+                Responde ÚNICAMENTE con este JSON:
                 {
-                  "country": "País oficial emisor",
+                  "country": "País o entidad emisora",
                   "era": "Periodo histórico",
-                  "issueYearEstimate": 1970,
-                  "faceValue": "Valor facial exacto",
-                  "series": "Serie o temática",
-                  "condition": "Usado o Nuevo",
-                  "rarity": "Común, Escaso o Raro",
-                  "motif": "Descripción del diseño o motivo",
-                  "historicalNote": "Resumen histórico",
-                  "estimatedMarketValue": "$0.80 - $2.00 USD",
-                  "referenceImageUrl": null,
+                  "issueYearEstimate": 1972,
+                  "faceValue": "Valor facial exacto con moneda",
+                  "series": "Serie a la que pertenece",
+                  "condition": "Estado",
+                  "rarity": "Rareza",
+                  "motif": "Nombre exacto del personaje, obra o evento",
+                  "historicalNote": "Explicación histórica detallada",
+                  "estimatedMarketValue": "$0.50 - $1.50 USD",
                   "catalogMichelNumber": "MiNr. ...",
                   "catalogScottNumber": "Scott ...",
                   "catalogYvertNumber": "Yvert ...",
@@ -98,7 +101,9 @@ class AiRecognitionRepository(
             }.toString()
 
             val mediaType = "application/json; charset=utf-8".toMediaType()
-            val models = listOf("gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-1.5-pro")
+            val models = listOf("gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-8b")
+
+            var lastError = ""
 
             for (model in models) {
                 try {
@@ -124,33 +129,49 @@ class AiRecognitionRepository(
 
                         if (!text.isNullOrBlank()) {
                             val clean = text.replace("```json", "").replace("```", "").trim()
-                            val stamp = json.decodeFromString(StampRecognitionResult.serializer(), clean)
-                            return@withContext AiRecognitionOutcome.Success(stamp)
+                            val baseResult = json.decodeFromString(StampRecognitionResult.serializer(), clean)
+                            
+                            // Buscar automáticamente la imagen nítida en Wikimedia Commons
+                            val hdImageUrl = fetchHdStampImage(baseResult.motif ?: baseResult.country.orEmpty())
+                            val finalResult = baseResult.copy(referenceImageUrl = hdImageUrl)
+                            
+                            return@withContext AiRecognitionOutcome.Success(finalResult)
                         }
+                    } else {
+                        lastError = "HTTP ${response.code()}: $bodyStr"
                     }
-                } catch (_: Exception) {}
+                } catch (e: Exception) {
+                    lastError = e.message ?: "Error de red"
+                }
             }
 
-            // Respaldo contextual seguro
-            val fallback = StampRecognitionResult(
-                country = "Alemania (Deutsche Bundespost)",
-                era = "1970 - 1980",
-                issueYearEstimate = 1974,
-                faceValue = "50 Pf",
-                series = "Serie de beneficencia / Conmemorativa",
-                condition = "Usado / Matasellado",
-                rarity = "Común (Coleccionable)",
-                motif = "Diseño gráfico institucional y servicios sociales",
-                historicalNote = "Sello postal emitido por la Deutsche Bundespost de la República Federal de Alemania.",
-                estimatedMarketValue = "$0.80 - $2.50 USD",
-                catalogMichelNumber = "MiNr. 814",
-                catalogScottNumber = "Scott 1140",
-                catalogYvertNumber = "Yvert 720",
-                confidence = 0.92f
-            )
-            AiRecognitionOutcome.Success(fallback)
+            AiRecognitionOutcome.Error("No se pudo procesar con la IA: $lastError")
         } catch (e: Exception) {
             AiRecognitionOutcome.Error(e.message ?: "Error al procesar la imagen")
+        }
+    }
+
+    private fun fetchHdStampImage(searchTerm: String): String? {
+        return try {
+            if (searchTerm.isBlank()) return null
+            val encodedQuery = URLEncoder.encode("$searchTerm stamp Briefmarke", "UTF-8")
+            val url = "https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=$encodedQuery&gsrlimit=1&prop=imageinfo&iiprop=url&format=json"
+
+            val request = Request.Builder().url(url).build()
+            val response = httpClient.newCall(request).execute()
+            val body = response.body?.string().orEmpty()
+
+            if (response.isSuccessful && body.isNotBlank()) {
+                val root = json.parseToJsonElement(body).jsonObject
+                val pages = root["query"]?.jsonObject?.get("pages")?.jsonObject
+                val firstPage = pages?.values?.firstOrNull()?.jsonObject
+                val imageInfo = firstPage?.get("imageinfo")?.jsonArray?.firstOrNull()?.jsonObject
+                imageInfo?.get("url")?.jsonPrimitive?.content
+            } else {
+                null
+            }
+        } catch (_: Exception) {
+            null
         }
     }
 }
