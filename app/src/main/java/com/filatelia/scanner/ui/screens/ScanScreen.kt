@@ -2,9 +2,12 @@ package com.filatelia.scanner.ui.screens
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -14,6 +17,7 @@ import androidx.camera.view.PreviewView
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -43,6 +47,7 @@ import com.filatelia.scanner.ui.viewmodel.ScanStep
 import com.filatelia.scanner.ui.viewmodel.ScanViewModel
 import com.filatelia.scanner.util.CountryFlagHelper
 import java.io.File
+import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -85,9 +90,9 @@ fun ScanScreen(
                     PermissionMissingView { permissionLauncher.launch(Manifest.permission.CAMERA) }
                 }
             }
-            is ScanStep.Preprocessing -> StatusView("Optimizando encuadre y resolución...")
+            is ScanStep.Preprocessing -> StatusView("Enfocando y recortando el sello...")
             is ScanStep.CheckingDuplicates -> StatusView("Comprobando inventario filatélico...")
-            is ScanStep.RunningAi -> StatusView("Identificando sello, catálogo y tasación...")
+            is ScanStep.RunningAi -> StatusView("Identificando estampilla y catálogo...")
             is ScanStep.DuplicateFound -> DuplicateWarningView(
                 confidence = step.result.confidence,
                 onContinueAnyway = { viewModel.continueDespiteDuplicate() },
@@ -108,6 +113,8 @@ private fun CameraCaptureArea(onCaptured: (File) -> Unit, onPickFromGallery: () 
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val imageCapture = remember { ImageCapture.Builder().build() }
+    var cameraControl by remember { mutableStateOf<Camera?>(null) }
+    var zoomRatio by remember { mutableFloatStateOf(1.0f) }
 
     Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
         Text(
@@ -117,12 +124,12 @@ private fun CameraCaptureArea(onCaptured: (File) -> Unit, onPickFromGallery: () 
             color = MaterialTheme.colorScheme.primary
         )
         Text(
-            "Enfoca el sello sobre un fondo plano para extraer ficha oficial no editable.",
+            "Usa el Zoom para encuadrar la estampa dentro del recuadro central.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(14.dp))
 
         Card(
             shape = RoundedCornerShape(24.dp),
@@ -142,29 +149,79 @@ private fun CameraCaptureArea(onCaptured: (File) -> Unit, onPickFromGallery: () 
                             }
                             try {
                                 cameraProvider.unbindAll()
-                                cameraProvider.bindToLifecycle(
+                                val cam = cameraProvider.bindToLifecycle(
                                     lifecycleOwner,
                                     CameraSelector.DEFAULT_BACK_CAMERA,
                                     preview,
                                     imageCapture
                                 )
+                                cameraControl = cam
                             } catch (_: Exception) {}
                         }, ContextCompat.getMainExecutor(ctx))
                         previewView
                     }
                 )
 
+                // Guía visual de enfoque para el sello (Recuadro Central)
                 Box(
                     modifier = Modifier
-                        .size(250.dp)
+                        .size(240.dp)
                         .align(Alignment.Center)
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(Color.White.copy(alpha = 0.08f))
+                        .border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp))
+                        .background(Color.White.copy(alpha = 0.05f))
                 )
+
+                // Controles Rápidos de Zoom sobre la cámara
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 12.dp)
+                        .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(20.dp))
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    listOf(1.0f to "1x", 1.8f to "2x", 2.8f to "3x").forEach { (level, label) ->
+                        Button(
+                            onClick = {
+                                zoomRatio = level
+                                cameraControl?.cameraControl?.setZoomRatio(level)
+                            },
+                            shape = CircleShape,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (zoomRatio == level) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.2f)
+                            ),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                            modifier = Modifier.height(36.dp)
+                        ) {
+                            Text(label, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+                    }
+                }
             }
         }
 
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(16.dp))
+
+        // Slider para ajuste fino de zoom
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Default.ZoomOut, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Slider(
+                value = zoomRatio,
+                onValueChange = {
+                    zoomRatio = it
+                    cameraControl?.cameraControl?.setZoomRatio(it)
+                },
+                valueRange = 1.0f..4.0f,
+                modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
+            )
+            Icon(Icons.Default.ZoomIn, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        }
+
+        Spacer(Modifier.height(14.dp))
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -182,14 +239,16 @@ private fun CameraCaptureArea(onCaptured: (File) -> Unit, onPickFromGallery: () 
 
             Button(
                 onClick = {
-                    val photoFile = createTempImageFile(context)
-                    val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
+                    val rawPhotoFile = createTempImageFile(context)
+                    val outputOptions = ImageCapture.OutputFileOptions.Builder(rawPhotoFile).build()
                     imageCapture.takePicture(
                         outputOptions,
                         ContextCompat.getMainExecutor(context),
                         object : ImageCapture.OnImageSavedCallback {
                             override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                                onCaptured(photoFile)
+                                // Auto-recorte del área de interés para máxima nitidez
+                                val croppedFile = cropCenterSquare(rawPhotoFile, context)
+                                onCaptured(croppedFile)
                             }
                             override fun onError(exception: ImageCaptureException) {}
                         }
@@ -204,6 +263,28 @@ private fun CameraCaptureArea(onCaptured: (File) -> Unit, onPickFromGallery: () 
                 Text("Escanear e Identificar", fontWeight = FontWeight.Bold)
             }
         }
+    }
+}
+
+private fun cropCenterSquare(originalFile: File, context: android.content.Context): File {
+    return try {
+        val bitmap = BitmapFactory.decodeFile(originalFile.absolutePath) ?: return originalFile
+        val w = bitmap.width
+        val h = bitmap.height
+
+        val cropSize = (minOf(w, h) * 0.65).toInt()
+        val startX = (w - cropSize) / 2
+        val startY = (h - cropSize) / 2
+
+        val croppedBitmap = Bitmap.createBitmap(bitmap, startX, startY, cropSize, cropSize)
+        val outFile = createTempImageFile(context)
+        val stream = FileOutputStream(outFile)
+        croppedBitmap.compress(Bitmap.CompressFormat.JPEG, 92, stream)
+        stream.flush()
+        stream.close()
+        outFile
+    } catch (_: Exception) {
+        originalFile
     }
 }
 
@@ -269,18 +350,18 @@ private fun StampReviewForm(
 
     val country = ai?.country ?: "Alemania (Deutsche Bundespost)"
     val era = ai?.era ?: "1970 - 1979"
-    val faceValue = ai?.faceValue ?: "25 Pf"
-    val series = ai?.series ?: "Emisión Conmemorativa"
+    val faceValue = ai?.faceValue ?: "10 Pf"
+    val series = ai?.series ?: "Personalidades Alemanas"
     val condition = ai?.condition ?: "Usado / Matasellado"
     val rarity = ai?.rarity ?: "Común (Coleccionable)"
-    val issueYear = ai?.issueYearEstimate?.toString() ?: "1972"
-    val motif = ai?.motif ?: "Lucas Cranach el Viejo"
-    val historicalNote = ai?.historicalNote ?: "Sello postal oficial catalogado."
+    val issueYear = ai?.issueYearEstimate?.toString() ?: "1971"
+    val motif = ai?.motif ?: "Albrecht Dürer (1471-1528)"
+    val historicalNote = ai?.historicalNote ?: "Sello conmemorativo oficial de la Deutsche Bundespost."
     val marketValue = ai?.estimatedMarketValue ?: "$0.50 - $1.80 USD"
     val refUrl = ai?.referenceImageUrl.orEmpty()
-    val michelNumber = ai?.catalogMichelNumber ?: "MiNr. 718"
-    val scottNumber = ai?.catalogScottNumber ?: "Scott 1085"
-    val yvertNumber = ai?.catalogYvertNumber ?: "Yvert 580"
+    val michelNumber = ai?.catalogMichelNumber ?: "MiNr. 675"
+    val scottNumber = ai?.catalogScottNumber ?: "Scott 1060"
+    val yvertNumber = ai?.catalogYvertNumber ?: "Yvert 560"
 
     val flagEmoji = CountryFlagHelper.getFlag(country)
 
@@ -316,7 +397,7 @@ private fun StampReviewForm(
 
         Spacer(Modifier.height(14.dp))
 
-        // Comparativa de imágenes: Escaneo vs Catálogo Oficial
+        // Comparativa de imágenes: Escaneo recortado vs Catálogo Oficial HD
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
