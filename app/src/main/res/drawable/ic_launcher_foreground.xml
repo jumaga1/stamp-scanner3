@@ -3,13 +3,26 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    
+    <!-- Base cuadrada dentada de la estampilla -->
     <path
-        android:fillColor="#C9A227"
-        android:pathData="M24,24h60v60h-60z" />
+        android:fillColor="#F8FAFC"
+        android:strokeColor="#94A3B8"
+        android:strokeWidth="1.5"
+        android:pathData="M24,24 h60 v60 h-60 z"/>
+
+    <!-- Marco interior azul marino -->
     <path
-        android:fillColor="#F5F2EA"
-        android:pathData="M34,34h40v40h-40z" />
+        android:fillColor="#1E293B"
+        android:pathData="M30,30 h48 v48 h-48 z"/>
+
+    <!-- Motivo de lupa filatélica / Corona dorada -->
     <path
-        android:fillColor="#2E5266"
-        android:pathData="M44,44 L64,44 L64,64 L44,64 Z M50,50 L58,50 L58,58 L50,58 Z" />
+        android:fillColor="#F59E0B"
+        android:pathData="M44,42 l10,-6 l10,6 l-3,14 h-14 z"/>
+
+    <!-- Texto facial estilizado -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M46,62 h16 v4 h-16 z"/>
 </vector>
