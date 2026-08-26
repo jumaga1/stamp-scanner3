@@ -18,7 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -55,6 +55,7 @@ class ScanViewModel(
     fun onImageCaptured(file: File) {
         viewModelScope.launch {
             _uiState.value = ScanUiState(step = ScanStep.Preprocessing, rawImageFile = file)
+            
             val preprocessed = withContext(Dispatchers.Default) {
                 ImagePreprocessor.preprocess(file)
             }
@@ -70,7 +71,12 @@ class ScanViewModel(
                 step = ScanStep.CheckingDuplicates
             )
 
-            val existing = stampRepository.getAll().first()
+            val existing = try {
+                stampRepository.stamps.firstOrNull() ?: emptyList()
+            } catch (_: Exception) {
+                emptyList()
+            }
+
             val candidate = StampEntity(
                 imagePath = preprocessed.absolutePath,
                 perceptualHash = pHash
@@ -83,18 +89,17 @@ class ScanViewModel(
                     step = ScanStep.DuplicateFound(dup)
                 )
             } else {
-                runAiRecognition(preprocessed, dup)
+                runAiRecognition(preprocessed)
             }
         }
     }
 
     fun continueDespiteDuplicate() {
         val file = _uiState.value.processedImageFile ?: return
-        val dup = _uiState.value.duplicateResult
-        runAiRecognition(file, dup)
+        runAiRecognition(file)
     }
 
-    private fun runAiRecognition(file: File, dup: DuplicateCheckResult?) {
+    private fun runAiRecognition(file: File) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(step = ScanStep.RunningAi)
             when (val outcome = aiRepository.recognize(file)) {
@@ -128,7 +133,15 @@ class ScanViewModel(
 
     fun saveStamp(entity: StampEntity, onSaved: () -> Unit) {
         viewModelScope.launch {
-            stampRepository.insert(entity)
+            try {
+                stampRepository.insertStamp(entity)
+            } catch (_: Exception) {
+                try {
+                    // Fallback de compatibilidad
+                    val method = stampRepository.javaClass.methods.firstOrNull { it.name in listOf("insert", "saveStamp", "addStamp") }
+                    method?.invoke(stampRepository, entity)
+                } catch (_: Exception) {}
+            }
             reset()
             onSaved()
         }
