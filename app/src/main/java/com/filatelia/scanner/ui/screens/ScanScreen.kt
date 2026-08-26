@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import coil.compose.rememberAsyncImagePainter
 import com.filatelia.scanner.data.StampEntity
 import com.filatelia.scanner.duplicate.DuplicateConfidence
 import com.filatelia.scanner.ui.viewmodel.ScanStep
@@ -84,9 +85,9 @@ fun ScanScreen(
                     PermissionMissingView { permissionLauncher.launch(Manifest.permission.CAMERA) }
                 }
             }
-            is ScanStep.Preprocessing -> StatusView("Procesando imagen filatélica...")
-            is ScanStep.CheckingDuplicates -> StatusView("Verificando duplicados en la colección...")
-            is ScanStep.RunningAi -> StatusView("Identificando país, catálogo y tasación...")
+            is ScanStep.Preprocessing -> StatusView("Optimizando encuadre y resolución...")
+            is ScanStep.CheckingDuplicates -> StatusView("Comprobando catálogo e inventario...")
+            is ScanStep.RunningAi -> StatusView("Identificando sello, catálogo Michel y tasación...")
             is ScanStep.DuplicateFound -> DuplicateWarningView(
                 confidence = step.result.confidence,
                 onContinueAnyway = { viewModel.continueDespiteDuplicate() },
@@ -116,7 +117,7 @@ private fun CameraCaptureArea(onCaptured: (File) -> Unit, onPickFromGallery: () 
             color = MaterialTheme.colorScheme.primary
         )
         Text(
-            "Enfoca el sello con buena iluminación sobre un fondo plano.",
+            "Coloca el sello sobre un fondo plano para extraer datos e imagen HD de catálogo.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -155,9 +156,9 @@ private fun CameraCaptureArea(onCaptured: (File) -> Unit, onPickFromGallery: () 
 
                 Box(
                     modifier = Modifier
-                        .size(240.dp)
+                        .size(250.dp)
                         .align(Alignment.Center)
-                        .clip(RoundedCornerShape(16.dp))
+                        .clip(RoundedCornerShape(18.dp))
                         .background(Color.White.copy(alpha = 0.08f))
                 )
             }
@@ -242,20 +243,16 @@ private fun DuplicateWarningView(
             }
             Spacer(Modifier.height(10.dp))
             val message = when (confidence) {
-                DuplicateConfidence.CASI_SEGURO -> "Este ejemplar coincide plenamente con un sello registrado previamente en tu inventario."
+                DuplicateConfidence.CASI_SEGURO -> "Este ejemplar coincide con uno ya existente en tu colección."
                 DuplicateConfidence.PROBABLE -> "La imagen tiene alta correlación visual con tu colección."
-                DuplicateConfidence.POSIBLE -> "Existe un sello con país y valor facial similares."
+                DuplicateConfidence.POSIBLE -> "Existe un sello con país y facial similares."
                 DuplicateConfidence.NINGUNO -> ""
             }
             Text(message, style = MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.height(20.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) {
-                    Text("Cancelar")
-                }
-                Button(onClick = onContinueAnyway, modifier = Modifier.weight(1f)) {
-                    Text("Continuar")
-                }
+                OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) { Text("Cancelar") }
+                Button(onClick = onContinueAnyway, modifier = Modifier.weight(1f)) { Text("Continuar") }
             }
         }
     }
@@ -279,6 +276,7 @@ private fun StampReviewForm(
     var motif by remember { mutableStateOf(ai?.motif ?: "") }
     var historicalNote by remember { mutableStateOf(ai?.historicalNote ?: "") }
     var marketValue by remember { mutableStateOf(ai?.estimatedMarketValue ?: "$1.00 - $3.50 USD") }
+    var refUrl by remember { mutableStateOf(ai?.referenceImageUrl ?: "") }
     var michelNumber by remember { mutableStateOf(ai?.catalogMichelNumber ?: "") }
     var scottNumber by remember { mutableStateOf(ai?.catalogScottNumber ?: "") }
     var yvertNumber by remember { mutableStateOf(ai?.catalogYvertNumber ?: "") }
@@ -286,7 +284,7 @@ private fun StampReviewForm(
     val flagEmoji = CountryFlagHelper.getFlag(country)
 
     Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-        // ENCABEZADO DESTACADO: BANDERA Y PAÍS
+        // Encabezado con bandera y país emisor
         Card(
             shape = RoundedCornerShape(18.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
@@ -315,25 +313,69 @@ private fun StampReviewForm(
             }
         }
 
-        // FOTOGRAFÍA DEL SELLO
-        uiState.processedBitmap?.let {
-            Spacer(Modifier.height(14.dp))
-            Card(
-                shape = RoundedCornerShape(18.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-                modifier = Modifier.fillMaxWidth().height(250.dp)
-            ) {
-                Image(
-                    bitmap = it.asImageBitmap(),
-                    contentDescription = "Sello escaneado",
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.05f))
-                )
+        Spacer(Modifier.height(14.dp))
+
+        // Comparativa de imágenes: Escaneo vs Catálogo Oficial
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            uiState.processedBitmap?.let {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
+                    modifier = Modifier.weight(1f).height(190.dp)
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.fillMaxSize().padding(6.dp)
+                    ) {
+                        Image(
+                            bitmap = it.asImageBitmap(),
+                            contentDescription = "Tu escaneo",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.weight(1f).fillMaxWidth()
+                        )
+                        Text(
+                            "Tu Escaneo",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+
+            if (refUrl.isNotBlank()) {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
+                    modifier = Modifier.weight(1f).height(190.dp)
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.fillMaxSize().padding(6.dp)
+                    ) {
+                        Image(
+                            painter = rememberAsyncImagePainter(refUrl),
+                            contentDescription = "Imagen HD Oficial",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.weight(1f).fillMaxWidth()
+                        )
+                        Text(
+                            "Catálogo (HD)",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
             }
         }
 
-        // TARJETA DE VALOR DE MERCADO
         Spacer(Modifier.height(14.dp))
+
+        // Tarjeta de Valor de Mercado
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
@@ -374,6 +416,7 @@ private fun StampReviewForm(
         LabeledField("Año de emisión", issueYear) { issueYear = it }
         LabeledField("Valor facial", faceValue) { faceValue = it }
         LabeledField("Precio de Mercado Estimado", marketValue) { marketValue = it }
+        LabeledField("URL Imagen Catálogo (HD)", refUrl) { refUrl = it }
         LabeledField("Periodo / Época histórica", era) { era = it }
         LabeledField("Serie o emisión", series) { series = it }
         LabeledField("Motivo o diseño ilustrado", motif) { motif = it }
@@ -389,13 +432,18 @@ private fun StampReviewForm(
 
         Spacer(Modifier.height(24.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            OutlinedButton(onClick = onDiscard, modifier = Modifier.weight(1f).height(50.dp), shape = RoundedCornerShape(12.dp)) {
+            OutlinedButton(
+                onClick = onDiscard,
+                modifier = Modifier.weight(1f).height(50.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) {
                 Text("Descartar")
             }
             Button(
                 onClick = {
                     val entity = StampEntity(
                         imagePath = uiState.processedImageFile?.absolutePath ?: "",
+                        referenceImageUrl = refUrl.ifBlank { null },
                         perceptualHash = uiState.perceptualHash ?: "",
                         country = country.ifBlank { "Desconocido" },
                         era = era.ifBlank { null },
