@@ -7,9 +7,6 @@ on:
     branches: [ "main" ]
   workflow_dispatch: {}
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE20: true
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -29,14 +26,9 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Instalar plataformas y build-tools de Android
-        run: |
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager "platforms;android-34" "build-tools;34.0.0" > /dev/null
-
       - name: Crear local.properties
         run: |
-          echo "sdk.dir=${ANDROID_HOME}" > local.properties
+          echo "sdk.dir=${ANDROID_SDK_ROOT:-$ANDROID_HOME}" > local.properties
           echo "AI_API_KEY=${{ secrets.AI_API_KEY || 'AIzaSyFakeKeyForBuild' }}" >> local.properties
           echo "AI_API_BASE_URL=${{ secrets.AI_API_BASE_URL || 'https://generativelanguage.googleapis.com/' }}" >> local.properties
 
