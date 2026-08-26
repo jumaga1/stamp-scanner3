@@ -21,8 +21,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil.compose.rememberAsyncImagePainter
 import com.filatelia.scanner.data.StampEntity
+import com.filatelia.scanner.util.CountryFlagHelper
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -32,10 +34,13 @@ fun StampDetailScreen(
     onDelete: () -> Unit,
     onBack: () -> Unit
 ) {
+    val flag = CountryFlagHelper.getFlag(stamp.country)
+    val displayImage = stamp.referenceImageUrl?.ifBlank { null } ?: File(stamp.imagePath)
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Detalles del Sello", fontWeight = FontWeight.Bold) },
+                title = { Text("Ficha Oficial del Sello", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Atrás")
@@ -60,13 +65,44 @@ fun StampDetailScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp)
         ) {
-            // Imagen del sello en tarjeta destacada
+            // Cabecera con Bandera y País
+            Card(
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(flag, fontSize = 40.sp)
+                    Spacer(Modifier.width(14.dp))
+                    Column {
+                        Text(
+                            "PAÍS EMISOR",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                        )
+                        Text(
+                            stamp.country ?: "Desconocido",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // Tarjeta de Imagen Nítida HD de Catálogo
             Card(
                 shape = RoundedCornerShape(20.dp),
                 elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(280.dp)
+                    .height(290.dp)
             ) {
                 Box(
                     modifier = Modifier
@@ -74,19 +110,19 @@ fun StampDetailScreen(
                         .background(Color.Black.copy(alpha = 0.04f))
                 ) {
                     Image(
-                        painter = rememberAsyncImagePainter(File(stamp.imagePath)),
+                        painter = rememberAsyncImagePainter(model = displayImage),
                         contentDescription = stamp.motif ?: "Sello Postal",
                         contentScale = ContentScale.Fit,
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(8.dp)
+                            .padding(10.dp)
                     )
                 }
             }
 
             Spacer(Modifier.height(16.dp))
 
-            // Tarjeta de Valor de Mercado
+            // Tarjeta de Valor Comercial
             if (!stamp.estimatedMarketValue.isNullOrBlank()) {
                 Card(
                     shape = RoundedCornerShape(16.dp),
@@ -124,42 +160,14 @@ fun StampDetailScreen(
                 Spacer(Modifier.height(16.dp))
             }
 
-            // Indicador de IA
-            if (stamp.aiSuggested) {
-                Card(
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            Icons.Default.Verified,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            "Catalogado con Inteligencia Artificial",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                    }
-                }
-                Spacer(Modifier.height(16.dp))
-            }
-
-            // Ficha de Datos
+            // Ficha de Datos Oficial
             Card(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Column(modifier = Modifier.padding(18.dp)) {
                     Text(
                         "Información Filatélica",
                         style = MaterialTheme.typography.titleMedium,
@@ -168,12 +176,12 @@ fun StampDetailScreen(
                     )
                     Spacer(Modifier.height(12.dp))
 
-                    DetailItem("País / Emisor", stamp.country)
+                    DetailItem("País / Entidad", stamp.country)
                     DetailItem("Año de Emisión", stamp.issueYear?.toString())
                     DetailItem("Valor Facial", stamp.faceValue)
                     DetailItem("Periodo / Época", stamp.era)
                     DetailItem("Serie / Emisión", stamp.series)
-                    DetailItem("Motivo", stamp.motif)
+                    DetailItem("Motivo / Ilustración", stamp.motif)
                     DetailItem("Estado de Conservación", stamp.condition)
                     DetailItem("Rareza", stamp.rarity)
                     DetailItem("Nota Histórica", stamp.historicalNote)
@@ -183,7 +191,7 @@ fun StampDetailScreen(
                     Spacer(Modifier.height(12.dp))
 
                     Text(
-                        "Catálogos Filatélicos",
+                        "Catálogos de Referencia",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
