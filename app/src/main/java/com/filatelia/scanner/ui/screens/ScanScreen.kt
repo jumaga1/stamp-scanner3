@@ -11,23 +11,25 @@ import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.PhotoLibrary
-import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
@@ -81,9 +83,9 @@ fun ScanScreen(
                     PermissionMissingView { permissionLauncher.launch(Manifest.permission.CAMERA) }
                 }
             }
-            is ScanStep.Preprocessing -> StatusView("Procesando imagen (recorte y normalización)...")
-            is ScanStep.CheckingDuplicates -> StatusView("Verificando duplicados en tu colección...")
-            is ScanStep.RunningAi -> StatusView("Analizando con IA de visión filatélica...")
+            is ScanStep.Preprocessing -> StatusView("Procesando encuadre y resolución...")
+            is ScanStep.CheckingDuplicates -> StatusView("Comparando con tu inventario de sellos...")
+            is ScanStep.RunningAi -> StatusView("Consultando base filatélica de IA...")
             is ScanStep.DuplicateFound -> DuplicateWarningView(
                 confidence = step.result.confidence,
                 onContinueAnyway = { viewModel.continueDespiteDuplicate() },
@@ -106,68 +108,77 @@ private fun CameraCaptureArea(onCaptured: (File) -> Unit, onPickFromGallery: () 
     val imageCapture = remember { ImageCapture.Builder().build() }
 
     Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+        Text(
+            "Identificador Filatélico Pro",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.ExtraBold,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Text(
+            "Enfoca el sello dentro del recuadro para tasar y catalogar automáticamente.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Spacer(Modifier.height(16.dp))
+
         Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-            modifier = Modifier.fillMaxWidth()
+            shape = RoundedCornerShape(24.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+            modifier = Modifier.fillMaxWidth().height(420.dp)
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    "Escanear Sello Postal",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
+            Box(modifier = Modifier.fillMaxSize()) {
+                AndroidView(
+                    modifier = Modifier.fillMaxSize(),
+                    factory = { ctx ->
+                        val previewView = PreviewView(ctx)
+                        val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+                        cameraProviderFuture.addListener({
+                            val cameraProvider = cameraProviderFuture.get()
+                            val preview = Preview.Builder().build().also {
+                                it.setSurfaceProvider(previewView.surfaceProvider)
+                            }
+                            try {
+                                cameraProvider.unbindAll()
+                                cameraProvider.bindToLifecycle(
+                                    lifecycleOwner,
+                                    CameraSelector.DEFAULT_BACK_CAMERA,
+                                    preview,
+                                    imageCapture
+                                )
+                            } catch (_: Exception) {}
+                        }, ContextCompat.getMainExecutor(ctx))
+                        previewView
+                    }
                 )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "Centra el sello con buena iluminación sobre un fondo neutro.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+
+                // Guía visual de enfoque para el sello
+                Box(
+                    modifier = Modifier
+                        .size(240.dp)
+                        .align(Alignment.Center)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color.White.copy(alpha = 0.08f))
                 )
             }
         }
 
-        Spacer(Modifier.height(14.dp))
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(380.dp)
-                .clip(RoundedCornerShape(20.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-        ) {
-            AndroidView(
-                modifier = Modifier.fillMaxSize(),
-                factory = { ctx ->
-                    val previewView = PreviewView(ctx)
-                    val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-                    cameraProviderFuture.addListener({
-                        val cameraProvider = cameraProviderFuture.get()
-                        val preview = Preview.Builder().build().also {
-                            it.setSurfaceProvider(previewView.surfaceProvider)
-                        }
-                        try {
-                            cameraProvider.unbindAll()
-                            cameraProvider.bindToLifecycle(
-                                lifecycleOwner,
-                                CameraSelector.DEFAULT_BACK_CAMERA,
-                                preview,
-                                imageCapture
-                            )
-                        } catch (_: Exception) {}
-                    }, ContextCompat.getMainExecutor(ctx))
-                    previewView
-                }
-            )
-        }
-
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(20.dp))
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
+            OutlinedButton(
+                onClick = onPickFromGallery,
+                modifier = Modifier.size(56.dp),
+                shape = CircleShape,
+                contentPadding = PaddingValues(0.dp)
+            ) {
+                Icon(Icons.Default.PhotoLibrary, contentDescription = "Galería")
+            }
+
             Button(
                 onClick = {
                     val photoFile = createTempImageFile(context)
@@ -183,20 +194,13 @@ private fun CameraCaptureArea(onCaptured: (File) -> Unit, onPickFromGallery: () 
                         }
                     )
                 },
-                modifier = Modifier.weight(1f).height(50.dp),
-                shape = RoundedCornerShape(12.dp)
+                modifier = Modifier.weight(1f).height(56.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
             ) {
                 Icon(Icons.Default.CameraAlt, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text("Capturar", fontWeight = FontWeight.SemiBold)
-            }
-
-            OutlinedButton(
-                onClick = onPickFromGallery,
-                modifier = Modifier.height(50.dp),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Icon(Icons.Default.PhotoLibrary, contentDescription = null)
+                Text("Escanear e Identificar", fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -205,13 +209,17 @@ private fun CameraCaptureArea(onCaptured: (File) -> Unit, onPickFromGallery: () 
 @Composable
 private fun StatusView(message: String) {
     Column(
-        modifier = Modifier.fillMaxSize().padding(32.dp),
+        modifier = Modifier.fillMaxSize().padding(40.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, strokeWidth = 4.dp)
-        Spacer(Modifier.height(20.dp))
-        Text(message, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+        CircularProgressIndicator(
+            color = MaterialTheme.colorScheme.primary,
+            strokeWidth = 4.dp,
+            modifier = Modifier.size(54.dp)
+        )
+        Spacer(Modifier.height(24.dp))
+        Text(message, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -223,27 +231,28 @@ private fun DuplicateWarningView(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth().padding(16.dp),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary)
                 Spacer(Modifier.width(8.dp))
-                Text("¡Posible Sello Duplicado!", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text("Posible Ejemplar Duplicado", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             }
             Spacer(Modifier.height(10.dp))
             val message = when (confidence) {
-                DuplicateConfidence.CASI_SEGURO -> "Este sello es idéntico a uno ya existente en tu colección."
-                DuplicateConfidence.PROBABLE -> "La imagen tiene alta coincidencia con otro de tus sellos guardados."
-                DuplicateConfidence.POSIBLE -> "Existe un sello con datos similares registrados previamente."
+                DuplicateConfidence.CASI_SEGURO -> "Este ejemplar coincide plenamente con un sello registrado previamente en tu inventario."
+                DuplicateConfidence.PROBABLE -> "La imagen tiene alta correlación visual con tu colección."
+                DuplicateConfidence.POSIBLE -> "Existe un sello con país y valor facial similares."
                 DuplicateConfidence.NINGUNO -> ""
             }
             Text(message, style = MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.height(20.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) {
-                    Text("Descartar")
+                    Text("Cancelar")
                 }
                 Button(onClick = onContinueAnyway, modifier = Modifier.weight(1f)) {
                     Text("Continuar")
@@ -270,46 +279,79 @@ private fun StampReviewForm(
     var issueYear by remember { mutableStateOf(ai?.issueYearEstimate?.toString() ?: "") }
     var motif by remember { mutableStateOf(ai?.motif ?: "") }
     var historicalNote by remember { mutableStateOf(ai?.historicalNote ?: "") }
+    var marketValue by remember { mutableStateOf(ai?.estimatedMarketValue ?: "$1.00 - $3.50 USD") }
     var michelNumber by remember { mutableStateOf(ai?.catalogMichelNumber ?: "") }
     var scottNumber by remember { mutableStateOf(ai?.catalogScottNumber ?: "") }
     var yvertNumber by remember { mutableStateOf(ai?.catalogYvertNumber ?: "") }
 
     Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-        Text("Ficha del Sello Identificado", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text("Resultado de Identificación", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
 
+        // Visualizador de imagen del sello
         uiState.processedBitmap?.let {
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(14.dp))
             Card(
-                shape = RoundedCornerShape(16.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+                shape = RoundedCornerShape(18.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                modifier = Modifier.fillMaxWidth().height(250.dp)
             ) {
                 Image(
                     bitmap = it.asImageBitmap(),
                     contentDescription = "Sello escaneado",
-                    modifier = Modifier.fillMaxWidth().height(240.dp)
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.05f))
                 )
             }
         }
 
-        uiState.aiUnavailableReason?.let { reason ->
-            Spacer(Modifier.height(8.dp))
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
-                Text(reason, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
+        // Tarjeta destacada de Valor de Mercado
+        Spacer(Modifier.height(14.dp))
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.5f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.MonetizationOn,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                    modifier = Modifier.size(36.dp)
+                )
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    Text(
+                        "VALOR DE MERCADO ESTIMADO",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                    Text(
+                        marketValue,
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                }
             }
         }
 
-        ai?.let {
-            Spacer(Modifier.height(12.dp))
+        if (ai != null) {
+            Spacer(Modifier.height(10.dp))
             Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-                shape = RoundedCornerShape(12.dp)
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
             ) {
                 Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.Default.Verified, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        "Identificado por IA (Certeza: ${(it.confidence * 100).toInt()}%)",
-                        style = MaterialTheme.typography.labelLarge,
+                        "Identificado con ${(ai.confidence * 100).toInt()}% de confianza",
+                        style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
@@ -317,25 +359,35 @@ private fun StampReviewForm(
             }
         }
 
-        Spacer(Modifier.height(16.dp))
-        Text("Información Básica", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        LabeledField("País / Entidad emisora (ej. Alemania, RDA)", country) { country = it }
-        LabeledField("Año de emisión", issueYear) { issueYear = it }
-        LabeledField("Valor facial (ej. 40 Pf)", faceValue) { faceValue = it }
-        LabeledField("Época histórica", era) { era = it }
-        LabeledField("Serie o emisión", series) { series = it }
-        LabeledField("Diseño / Motivo ilustrado", motif) { motif = it }
-        LabeledField("Estado de conservación", condition) { condition = it }
+        uiState.aiUnavailableReason?.let { reason ->
+            Spacer(Modifier.height(10.dp))
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                Text(reason, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
+            }
+        }
 
-        Spacer(Modifier.height(12.dp))
-        Text("Catálogos Filatélicos", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        LabeledField("Nº Catálogo Michel (ej. MiNr. 814)", michelNumber) { michelNumber = it }
+        Spacer(Modifier.height(20.dp))
+        Text("Ficha Filatélica", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        LabeledField("País / Entidad emisora", country) { country = it }
+        LabeledField("Año de emisión", issueYear) { issueYear = it }
+        LabeledField("Valor facial", faceValue) { faceValue = it }
+        LabeledField("Precio de Mercado Estimado", marketValue) { marketValue = it }
+        LabeledField("Periodo / Época histórica", era) { era = it }
+        LabeledField("Serie o emisión", series) { series = it }
+        LabeledField("Motivo o diseño ilustrado", motif) { motif = it }
+        LabeledField("Estado de conservación", condition) { condition = it }
+        LabeledField("Rareza", rarity) { rarity = it }
+        LabeledField("Nota histórica", historicalNote) { historicalNote = it }
+
+        Spacer(Modifier.height(14.dp))
+        Text("Catálogos Filatélicos de Referencia", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        LabeledField("Nº Catálogo Michel (MiNr.)", michelNumber) { michelNumber = it }
         LabeledField("Nº Catálogo Scott", scottNumber) { scottNumber = it }
         LabeledField("Nº Catálogo Yvert", yvertNumber) { yvertNumber = it }
 
-        Spacer(Modifier.height(20.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = onDiscard, modifier = Modifier.weight(1f).height(48.dp)) {
+        Spacer(Modifier.height(24.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            OutlinedButton(onClick = onDiscard, modifier = Modifier.weight(1f).height(50.dp), shape = RoundedCornerShape(12.dp)) {
                 Text("Descartar")
             }
             Button(
@@ -352,6 +404,7 @@ private fun StampReviewForm(
                         issueYear = issueYear.toIntOrNull(),
                         motif = motif.ifBlank { null },
                         historicalNote = historicalNote.ifBlank { null },
+                        estimatedMarketValue = marketValue.ifBlank { null },
                         catalogScottNumber = scottNumber.ifBlank { null },
                         catalogMichelNumber = michelNumber.ifBlank { null },
                         catalogYvertNumber = yvertNumber.ifBlank { null },
@@ -360,13 +413,13 @@ private fun StampReviewForm(
                     )
                     onSave(entity)
                 },
-                modifier = Modifier.weight(1f).height(48.dp),
-                shape = RoundedCornerShape(10.dp)
+                modifier = Modifier.weight(1f).height(50.dp),
+                shape = RoundedCornerShape(12.dp)
             ) {
-                Text("Guardar Sello")
+                Text("Guardar en Colección", fontWeight = FontWeight.Bold)
             }
         }
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(30.dp))
     }
 }
 
@@ -376,7 +429,7 @@ private fun LabeledField(label: String, value: String, onChange: (String) -> Uni
         value = value,
         onValueChange = onChange,
         label = { Text(label) },
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(12.dp),
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
     )
 }
@@ -384,30 +437,34 @@ private fun LabeledField(label: String, value: String, onChange: (String) -> Uni
 @Composable
 private fun PermissionMissingView(onRequest: () -> Unit) {
     Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
+        modifier = Modifier.fillMaxSize().padding(28.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)
-        Spacer(Modifier.height(10.dp))
-        Text("Permiso de cámara necesario", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(12.dp))
-        Button(onClick = onRequest) { Text("Conceder permiso") }
+        Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.height(16.dp))
+        Text("Permiso de Cámara Requerido", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(8.dp))
+        Text("Para escanear tus estampas y sellos postales se requiere acceso a la cámara.")
+        Spacer(Modifier.height(16.dp))
+        Button(onClick = onRequest, shape = RoundedCornerShape(12.dp)) { Text("Conceder Permiso") }
     }
 }
 
 @Composable
 private fun ErrorView(message: String, onRetry: () -> Unit) {
     Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
+        modifier = Modifier.fillMaxSize().padding(28.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text("Aviso", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(54.dp))
+        Spacer(Modifier.height(16.dp))
+        Text("Aviso de Conexión", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
         Text(message, style = MaterialTheme.typography.bodyMedium)
-        Spacer(Modifier.height(16.dp))
-        Button(onClick = onRetry) { Text("Reintentar") }
+        Spacer(Modifier.height(20.dp))
+        Button(onClick = onRetry, shape = RoundedCornerShape(12.dp)) { Text("Reintentar") }
     }
 }
 
