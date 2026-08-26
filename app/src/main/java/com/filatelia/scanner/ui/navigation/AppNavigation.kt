@@ -3,122 +3,95 @@ package com.filatelia.scanner.ui.navigation
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.Collections
+import androidx.compose.material.icons.filled.CollectionsBookmark
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.currentBackStackEntryAsState
-import androidx.navigation.compose.rememberNavController
-import com.filatelia.scanner.StampScannerApp
+import androidx.navigation.compose.*
+import com.filatelia.scanner.data.StampEntity
 import com.filatelia.scanner.ui.screens.CollectionScreen
 import com.filatelia.scanner.ui.screens.ScanScreen
 import com.filatelia.scanner.ui.screens.StampDetailScreen
-import com.filatelia.scanner.ui.screens.WelcomeScreen
 import com.filatelia.scanner.ui.viewmodel.CollectionViewModel
 import com.filatelia.scanner.ui.viewmodel.ScanViewModel
 import com.filatelia.scanner.ui.viewmodel.ViewModelFactory
 
-private const val ROUTE_WELCOME = "welcome"
-private const val ROUTE_SCAN = "scan"
-private const val ROUTE_COLLECTION = "collection"
-private const val ROUTE_DETAIL = "detail/{stampId}"
+sealed class Screen(val route: String, val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
+    object Scan : Screen("scan", "Escanear", Icons.Default.CameraAlt)
+    object Collection : Screen("collection", "Colección", Icons.Default.CollectionsBookmark)
+}
 
 @Composable
-fun AppNavigation(app: StampScannerApp) {
+fun AppNavigation(
+    factory: ViewModelFactory
+) {
     val navController = rememberNavController()
-    val factory = ViewModelFactory(app.stampRepository, app.aiRepository)
-    val navBackStackEntry by navController.currentBackStackEntryAsState()
-    val currentDestination = navBackStackEntry?.destination
-    val currentRoute = currentDestination?.route
+    var selectedStampForDetail by remember { mutableStateOf<StampEntity?>(null) }
 
-    // Ocultar la barra inferior en la portada de bienvenida
-    val showBottomBar = currentRoute != ROUTE_WELCOME && currentRoute?.startsWith("detail") == false
+    val scanViewModel: ScanViewModel = viewModel(factory = factory)
+    val collectionViewModel: CollectionViewModel = viewModel(factory = factory)
 
     Scaffold(
         bottomBar = {
-            if (showBottomBar) {
+            if (selectedStampForDetail == null) {
                 NavigationBar {
-                    NavigationBarItem(
-                        selected = currentDestination?.hierarchy?.any { it.route == ROUTE_SCAN } == true,
-                        onClick = {
-                            navController.navigate(ROUTE_SCAN) {
-                                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                                launchSingleTop = true
-                                restoreState = true
+                    val navBackStackEntry by navController.currentBackStackEntryAsState()
+                    val currentRoute = navBackStackEntry?.destination?.route
+
+                    val items = listOf(Screen.Scan, Screen.Collection)
+                    items.forEach { screen ->
+                        NavigationBarItem(
+                            icon = { Icon(screen.icon, contentDescription = screen.title) },
+                            label = { Text(screen.title) },
+                            selected = currentRoute == screen.route,
+                            onClick = {
+                                navController.navigate(screen.route) {
+                                    popUpTo(navController.graph.findStartDestination().id) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
                             }
-                        },
-                        icon = { Icon(Icons.Default.CameraAlt, contentDescription = null) },
-                        label = { Text("Escanear") }
-                    )
-                    NavigationBarItem(
-                        selected = currentDestination?.hierarchy?.any { it.route == ROUTE_COLLECTION } == true,
-                        onClick = {
-                            navController.navigate(ROUTE_COLLECTION) {
-                                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        },
-                        icon = { Icon(Icons.Default.Collections, contentDescription = null) },
-                        label = { Text("Colección") }
-                    )
+                        )
+                    }
                 }
             }
         }
-    ) { padding ->
-        NavHost(
-            navController = navController,
-            startDestination = ROUTE_WELCOME,
-            modifier = Modifier.padding(padding)
-        ) {
-            composable(ROUTE_WELCOME) {
-                WelcomeScreen(
-                    onStartClick = {
-                        navController.navigate(ROUTE_SCAN) {
-                            popUpTo(ROUTE_WELCOME) { inclusive = true }
+    ) { innerPadding ->
+        if (selectedStampForDetail != null) {
+            StampDetailScreen(
+                stamp = selectedStampForDetail!!,
+                onBack = { selectedStampForDetail = null },
+                onDelete = {
+                    collectionViewModel.deleteStamp(selectedStampForDetail!!)
+                    selectedStampForDetail = null
+                }
+            )
+        } else {
+            NavHost(
+                navController = navController,
+                startDestination = Screen.Scan.route,
+                modifier = Modifier.padding(innerPadding)
+            ) {
+                composable(Screen.Scan.route) {
+                    ScanScreen(
+                        viewModel = scanViewModel,
+                        onStampSaved = {
+                            navController.navigate(Screen.Collection.route) {
+                                popUpTo(Screen.Scan.route) { inclusive = false }
+                            }
                         }
-                    }
-                )
-            }
-            composable(ROUTE_SCAN) {
-                val scanViewModel: ScanViewModel = viewModel(factory = factory)
-                ScanScreen(
-                    viewModel = scanViewModel,
-                    onStampSaved = {
-                        navController.navigate(ROUTE_COLLECTION) {
-                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                            launchSingleTop = true
+                    )
+                }
+                composable(Screen.Collection.route) {
+                    CollectionScreen(
+                        viewModel = collectionViewModel,
+                        onStampClick = { stamp ->
+                            selectedStampForDetail = stamp
                         }
-                    }
-                )
-            }
-            composable(ROUTE_COLLECTION) {
-                val collectionViewModel: CollectionViewModel = viewModel(factory = factory)
-                CollectionScreen(
-                    viewModel = collectionViewModel,
-                    onStampClick = { stamp -> navController.navigate("detail/${stamp.id}") }
-                )
-            }
-            composable(ROUTE_DETAIL) { backStackEntry ->
-                val stampId = backStackEntry.arguments?.getString("stampId")?.toLongOrNull()
-                val collectionViewModel: CollectionViewModel = viewModel(factory = factory)
-                val stamps by collectionViewModel.stamps.collectAsState()
-                val stamp = stamps.firstOrNull { it.id == stampId }
-                if (stamp != null) {
-                    StampDetailScreen(
-                        stamp = stamp,
-                        onDelete = {
-                            collectionViewModel.deleteStamp(stamp)
-                            navController.popBackStack()
-                        },
-                        onBack = { navController.popBackStack() }
                     )
                 }
             }
