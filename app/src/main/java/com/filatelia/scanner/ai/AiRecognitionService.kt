@@ -1,5 +1,7 @@
 package com.filatelia.scanner.ai
 
+import okhttp3.RequestBody
+import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.POST
@@ -11,6 +13,6 @@ interface AiRecognitionService {
     suspend fun generateContent(
         @Url url: String,
         @Query("key") apiKey: String,
-        @Body request: GeminiRequest
-    ): Response<GeminiResponse>
+        @Body request: RequestBody
+    ): Response<ResponseBody>
 }
