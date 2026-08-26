@@ -2,7 +2,6 @@ package com.filatelia.scanner.ai
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.net.Uri
 import android.util.Base64
 import com.filatelia.scanner.BuildConfig
 import kotlinx.coroutines.Dispatchers
@@ -43,45 +42,45 @@ class AiRecognitionRepository(
 
     suspend fun recognize(imageFile: File): AiRecognitionOutcome = withContext(Dispatchers.IO) {
         try {
-            val key = effectiveApiKey
+            val token = effectiveApiKey
             val bitmap = BitmapFactory.decodeFile(imageFile.absolutePath)
-                ?: return@withContext AiRecognitionOutcome.Error("No se pudo cargar la imagen")
+                ?: return@withContext AiRecognitionOutcome.Error("No se pudo procesar la imagen capturada")
 
             val outputStream = ByteArrayOutputStream()
-            val maxDimension = 1200
+            val maxDimension = 1024
             val scale = if (bitmap.width > maxDimension || bitmap.height > maxDimension) {
                 val ratio = maxDimension.toFloat() / maxOf(bitmap.width, bitmap.height)
                 Bitmap.createScaledBitmap(bitmap, (bitmap.width * ratio).toInt(), (bitmap.height * ratio).toInt(), true)
             } else {
                 bitmap
             }
-            scale.compress(Bitmap.CompressFormat.JPEG, 90, outputStream)
+            scale.compress(Bitmap.CompressFormat.JPEG, 85, outputStream)
             val base64Image = Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
 
             val prompt = """
-                Analiza como experto filatélico la imagen de este sello postal.
-                Lee con extremo cuidado los textos impresos en los bordes, el valor numérico, el personaje o motivo y el emisor (ej. "LUCAS CRANACH d. Ä. 1472", "DEUTSCHE BUNDESPOST", valor "25").
-                
-                Responde ÚNICAMENTE con este JSON:
+                Eres un perito tasador y experto en filatelia internacional. Analiza detenidamente la fotografía de este sello postal.
+                Lee con exactitud los textos impresos en la estampilla, el valor facial, el país o correo emisor, las fechas y el motivo ilustrado.
+
+                Devuelve EXCLUSIVAMENTE un JSON válido con esta estructura:
                 {
-                  "country": "País o entidad emisora",
-                  "era": "Periodo histórico",
+                  "country": "País o entidad postal emisora (ej. Alemania (Deutsche Bundespost), RDA, México)",
+                  "era": "Periodo o época de emisión (ej. 1970 - 1979)",
                   "issueYearEstimate": 1972,
-                  "faceValue": "Valor facial exacto con moneda",
-                  "series": "Serie a la que pertenece",
-                  "condition": "Estado",
-                  "rarity": "Rareza",
-                  "motif": "Nombre exacto del personaje, obra o evento",
-                  "historicalNote": "Explicación histórica detallada",
-                  "estimatedMarketValue": "$0.50 - $1.50 USD",
-                  "catalogMichelNumber": "MiNr. ...",
-                  "catalogScottNumber": "Scott ...",
-                  "catalogYvertNumber": "Yvert ...",
+                  "faceValue": "Valor facial exacto con unidad (ej. 25 Pf, 50 Pf)",
+                  "series": "Nombre de la serie oficial o emisión conmemorativa",
+                  "condition": "Estado de conservación visual (ej. Usado / Matasellado, Nuevo)",
+                  "rarity": "Nivel de rareza (Común, Escaso, Raro)",
+                  "motif": "Nombre exacto del personaje, obra, monumento o evento ilustrado",
+                  "historicalNote": "Reseña histórica y contexto filatélico de la emisión",
+                  "estimatedMarketValue": "Valor estimado en mercado filatélico (ej. $0.50 - $1.80 USD)",
+                  "catalogMichelNumber": "Código aproximado Catálogo Michel (MiNr.)",
+                  "catalogScottNumber": "Código aproximado Catálogo Scott",
+                  "catalogYvertNumber": "Código aproximado Catálogo Yvert",
                   "confidence": 0.95
                 }
             """.trimIndent()
 
-            val geminiPayload = buildJsonObject {
+            val requestJson = buildJsonObject {
                 put("contents", buildJsonArray {
                     add(buildJsonObject {
                         put("parts", buildJsonArray {
@@ -101,51 +100,55 @@ class AiRecognitionRepository(
             }.toString()
 
             val mediaType = "application/json; charset=utf-8".toMediaType()
-            val models = listOf("gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-8b")
+
+            // Gateways compatibles con tokens de Vertex Express y Google AI
+            val targetEndpoints = listOf(
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$token",
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$token",
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-8b:generateContent?key=$token",
+                "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=$token"
+            )
 
             var lastError = ""
 
-            for (model in models) {
+            for (endpointUrl in targetEndpoints) {
                 try {
-                    val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$key"
-                    val requestBuilder = Request.Builder()
-                        .url(url)
-                        .addHeader("x-goog-api-key", key)
-                        .post(geminiPayload.toRequestBody(mediaType))
+                    val request = Request.Builder()
+                        .url(endpointUrl)
+                        .addHeader("Authorization", "Bearer $token")
+                        .addHeader("x-goog-api-key", token)
+                        .post(requestJson.toRequestBody(mediaType))
+                        .build()
 
-                    if (key.startsWith("AQ.")) {
-                        requestBuilder.addHeader("Authorization", "Bearer $key")
-                    }
+                    val response = httpClient.newCall(request).execute()
+                    val bodyString = response.body?.string().orEmpty()
 
-                    val response = httpClient.newCall(requestBuilder.build()).execute()
-                    val bodyStr = response.body?.string().orEmpty()
-
-                    if (response.isSuccessful && bodyStr.isNotBlank()) {
-                        val parsedObj = json.parseToJsonElement(bodyStr).jsonObject
-                        val text = parsedObj["candidates"]?.jsonArray?.firstOrNull()?.jsonObject
+                    if (response.isSuccessful && bodyString.isNotBlank()) {
+                        val rootObj = json.parseToJsonElement(bodyString).jsonObject
+                        val responseText = rootObj["candidates"]?.jsonArray?.firstOrNull()?.jsonObject
                             ?.get("content")?.jsonObject
                             ?.get("parts")?.jsonArray?.firstOrNull()?.jsonObject
                             ?.get("text")?.jsonPrimitive?.content
 
-                        if (!text.isNullOrBlank()) {
-                            val clean = text.replace("```json", "").replace("```", "").trim()
-                            val baseResult = json.decodeFromString(StampRecognitionResult.serializer(), clean)
+                        if (!responseText.isNullOrBlank()) {
+                            val cleanJson = responseText.replace("```json", "").replace("```", "").trim()
+                            val baseStamp = json.decodeFromString(StampRecognitionResult.serializer(), cleanJson)
                             
-                            // Buscar automáticamente la imagen nítida en Wikimedia Commons
-                            val hdImageUrl = fetchHdStampImage(baseResult.motif ?: baseResult.country.orEmpty())
-                            val finalResult = baseResult.copy(referenceImageUrl = hdImageUrl)
+                            // Buscar imagen oficial HD en Wikimedia Commons basada en el motivo identificado
+                            val hdUrl = fetchHdStampImage("${baseStamp.motif.orEmpty()} ${baseStamp.country.orEmpty()}")
+                            val finalStamp = baseStamp.copy(referenceImageUrl = hdUrl)
                             
-                            return@withContext AiRecognitionOutcome.Success(finalResult)
+                            return@withContext AiRecognitionOutcome.Success(finalStamp)
                         }
                     } else {
-                        lastError = "HTTP ${response.code()}: $bodyStr"
+                        lastError = "HTTP ${response.code()}: $bodyString"
                     }
                 } catch (e: Exception) {
                     lastError = e.message ?: "Error de red"
                 }
             }
 
-            AiRecognitionOutcome.Error("No se pudo procesar con la IA: $lastError")
+            AiRecognitionOutcome.Error("No se pudo consultar el modelo: $lastError")
         } catch (e: Exception) {
             AiRecognitionOutcome.Error(e.message ?: "Error al procesar la imagen")
         }
