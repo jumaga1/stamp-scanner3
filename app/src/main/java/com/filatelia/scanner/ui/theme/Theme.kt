@@ -7,22 +7,35 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
-private val StampPrimary = Color(0xFF2E5266)
-private val StampSecondary = Color(0xFF6E8898)
-private val StampAccent = Color(0xFFC9A227)
-private val StampBackground = Color(0xFFF5F2EA)
+val NavyPrimary = Color(0xFF1B3B6F)
+val NavySecondary = Color(0xFF28536B)
+val GoldTertiary = Color(0xFFC29B38)
+val WarmBackground = Color(0xFFF9F9FB)
+val SurfaceCard = Color(0xFFFFFFFF)
+val TextPrimary = Color(0xFF1A1C1E)
 
-private val LightColors = lightColorScheme(
-    primary = StampPrimary,
-    secondary = StampSecondary,
-    tertiary = StampAccent,
-    background = StampBackground
+val LightColors = lightColorScheme(
+    primary = NavyPrimary,
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFD6E3FF),
+    onPrimaryContainer = Color(0xFF001B3D),
+    secondary = NavySecondary,
+    onSecondary = Color.White,
+    tertiary = GoldTertiary,
+    onTertiary = Color.White,
+    background = WarmBackground,
+    onBackground = TextPrimary,
+    surface = SurfaceCard,
+    onSurface = TextPrimary
 )
 
-private val DarkColors = darkColorScheme(
-    primary = StampSecondary,
-    secondary = StampPrimary,
-    tertiary = StampAccent
+val DarkColors = darkColorScheme(
+    primary = Color(0xFFA8C8FF),
+    onPrimary = Color(0xFF003062),
+    secondary = Color(0xFFB5CCE9),
+    tertiary = Color(0xFFE5C158),
+    background = Color(0xFF121316),
+    surface = Color(0xFF1E1F24)
 )
 
 @Composable
@@ -30,6 +43,9 @@ fun StampScannerTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit
 ) {
-    val colors = if (darkTheme) DarkColors else LightColors
-    MaterialTheme(colorScheme = colors, content = content)
+    val colorScheme = if (darkTheme) DarkColors else LightColors
+    MaterialTheme(
+        colorScheme = colorScheme,
+        content = content
+    )
 }
