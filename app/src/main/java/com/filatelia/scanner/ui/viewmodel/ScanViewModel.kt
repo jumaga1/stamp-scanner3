@@ -10,7 +10,6 @@ import com.filatelia.scanner.ai.StampRecognitionResult
 import com.filatelia.scanner.data.StampEntity
 import com.filatelia.scanner.data.StampRepository
 import com.filatelia.scanner.duplicate.DuplicateCheckResult
-import com.filatelia.scanner.duplicate.DuplicateConfidence
 import com.filatelia.scanner.duplicate.DuplicateDetector
 import com.filatelia.scanner.imageprocessing.ImagePreprocessor
 import com.filatelia.scanner.imageprocessing.PerceptualHash
@@ -55,15 +54,16 @@ class ScanViewModel(
             _uiState.update { it.copy(step = ScanStep.Preprocessing, rawImageFile = file) }
 
             val prepResult = ImagePreprocessor.preprocess(file)
-            if (!prepResult.isSuccess || prepResult.outputFile == null) {
+            val processedFile = prepResult.file
+
+            val bitmap = BitmapFactory.decodeFile(processedFile.absolutePath)
+            if (bitmap == null) {
                 _uiState.update {
-                    it.copy(step = ScanStep.Error(prepResult.errorMessage ?: "Error al procesar la imagen."))
+                    it.copy(step = ScanStep.Error("Error al procesar la imagen del sello."))
                 }
                 return@launch
             }
 
-            val processedFile = prepResult.outputFile
-            val bitmap = BitmapFactory.decodeFile(processedFile.absolutePath)
             val hash = PerceptualHash.compute(bitmap)
 
             _uiState.update {
@@ -82,14 +82,25 @@ class ScanViewModel(
                 emptyList()
             }
 
-            val duplicateResult = DuplicateDetector.check(
-                candidateHash = hash,
-                candidateCountry = null,
-                candidateFaceValue = null,
-                existing = existingStamps
+            val candidateEntity = StampEntity(
+                imagePath = processedFile.absolutePath,
+                perceptualHash = hash,
+                country = "",
+                era = "",
+                faceValue = "",
+                series = "",
+                condition = "",
+                rarity = "",
+                motif = "",
+                historicalNote = ""
             )
 
-            if (duplicateResult.confidence != DuplicateConfidence.NINGUNO) {
+            val duplicateResult = DuplicateDetector.check(
+                candidate = candidateEntity,
+                collection = existingStamps
+            )
+
+            if (duplicateResult.isDuplicate) {
                 _uiState.update {
                     it.copy(
                         duplicateResult = duplicateResult,
