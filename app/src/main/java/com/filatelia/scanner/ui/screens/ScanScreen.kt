@@ -24,10 +24,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
 import com.filatelia.scanner.data.StampEntity
 import com.filatelia.scanner.duplicate.DuplicateConfidence
 import com.filatelia.scanner.ui.viewmodel.ScanStep
@@ -56,9 +56,6 @@ fun ScanScreen(
         if (!hasCameraPermission) permissionLauncher.launch(Manifest.permission.CAMERA)
     }
 
-    // Selector alternativo: elegir imagen de galería (útil si se usa un escáner externo
-    // que guarda el archivo, o simplemente para no depender solo de la cámara).
-    var pendingCaptureFile by remember { mutableStateOf<File?>(null) }
     val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri != null) {
             val file = copyUriToCacheFile(context, uri)
@@ -99,7 +96,7 @@ fun ScanScreen(
 @Composable
 private fun CameraCaptureArea(onCaptured: (File) -> Unit, onPickFromGallery: () -> Unit) {
     val context = LocalContext.current
-    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val imageCapture = remember { ImageCapture.Builder().build() }
 
     Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
@@ -130,8 +127,6 @@ private fun CameraCaptureArea(onCaptured: (File) -> Unit, onPickFromGallery: () 
                             imageCapture
                         )
                     } catch (_: Exception) {
-                        // Cámara no disponible en este dispositivo/emulador; el usuario
-                        // puede usar "Elegir de galería" como alternativa.
                     }
                 }, ContextCompat.getMainExecutor(ctx))
                 previewView
@@ -151,7 +146,6 @@ private fun CameraCaptureArea(onCaptured: (File) -> Unit, onPickFromGallery: () 
                             onCaptured(photoFile)
                         }
                         override fun onError(exception: ImageCaptureException) {
-                            // Se podría exponer un estado de error específico de cámara aquí.
                         }
                     }
                 )
