@@ -10,6 +10,7 @@ import com.filatelia.scanner.ai.StampRecognitionResult
 import com.filatelia.scanner.data.StampEntity
 import com.filatelia.scanner.data.StampRepository
 import com.filatelia.scanner.duplicate.DuplicateCheckResult
+import com.filatelia.scanner.duplicate.DuplicateConfidence
 import com.filatelia.scanner.duplicate.DuplicateDetector
 import com.filatelia.scanner.imageprocessing.ImagePreprocessor
 import com.filatelia.scanner.imageprocessing.PerceptualHash
@@ -54,7 +55,7 @@ class ScanViewModel(
             _uiState.update { it.copy(step = ScanStep.Preprocessing, rawImageFile = file) }
 
             val prepResult = ImagePreprocessor.preprocess(file)
-            val processedFile = prepResult.file
+            val processedFile = prepResult.outputFile
 
             val bitmap = BitmapFactory.decodeFile(processedFile.absolutePath)
             if (bitmap == null) {
@@ -100,7 +101,9 @@ class ScanViewModel(
                 collection = existingStamps
             )
 
-            if (duplicateResult.isDuplicate) {
+            val isDup = duplicateResult.hasDuplicate || duplicateResult.confidence != DuplicateConfidence.NINGUNO
+
+            if (isDup) {
                 _uiState.update {
                     it.copy(
                         duplicateResult = duplicateResult,
