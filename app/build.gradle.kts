@@ -7,7 +7,6 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
-// Lectura de la API Key: Prioridad variable de entorno de GitHub Actions > local.properties
 val localProps = Properties().apply {
     val localFile = rootProject.file("local.properties")
     if (localFile.exists()) {
@@ -35,7 +34,6 @@ android {
             useSupportLibrary = true
         }
 
-        // Inyección directa de la clave en BuildConfig
         buildConfigField("String", "AI_API_KEY", "\"$aiApiKey\"")
     }
 
@@ -87,7 +85,10 @@ dependencies {
     implementation("androidx.room:room-ktx:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")
     
-    // Networking & Serialization
+    // Retrofit & Networking
+    implementation("com.squareup.retrofit2:retrofit:2.9.0")
+    implementation("com.squareup.retrofit2:converter-scalars:2.9.0")
+    implementation("com.jakewharton.retrofit:retrofit2-kotlinx-serialization-converter:1.0.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
