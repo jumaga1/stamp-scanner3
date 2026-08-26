@@ -52,6 +52,7 @@ data class StampRecognitionResult(
     val motif: String? = null,
     val historicalNote: String? = null,
     val estimatedMarketValue: String? = null,
+    val referenceImageUrl: String? = null,
     val catalogMichelNumber: String? = null,
     val catalogScottNumber: String? = null,
     val catalogYvertNumber: String? = null,
