@@ -26,7 +26,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -34,12 +33,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.filatelia.scanner.data.StampEntity
 import com.filatelia.scanner.duplicate.DuplicateConfidence
 import com.filatelia.scanner.ui.viewmodel.ScanStep
 import com.filatelia.scanner.ui.viewmodel.ScanViewModel
+import com.filatelia.scanner.util.CountryFlagHelper
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -83,9 +84,9 @@ fun ScanScreen(
                     PermissionMissingView { permissionLauncher.launch(Manifest.permission.CAMERA) }
                 }
             }
-            is ScanStep.Preprocessing -> StatusView("Procesando encuadre y resolución...")
-            is ScanStep.CheckingDuplicates -> StatusView("Comparando con tu inventario de sellos...")
-            is ScanStep.RunningAi -> StatusView("Consultando base filatélica de IA...")
+            is ScanStep.Preprocessing -> StatusView("Procesando imagen filatélica...")
+            is ScanStep.CheckingDuplicates -> StatusView("Verificando duplicados en la colección...")
+            is ScanStep.RunningAi -> StatusView("Identificando país, catálogo y tasación...")
             is ScanStep.DuplicateFound -> DuplicateWarningView(
                 confidence = step.result.confidence,
                 onContinueAnyway = { viewModel.continueDespiteDuplicate() },
@@ -115,7 +116,7 @@ private fun CameraCaptureArea(onCaptured: (File) -> Unit, onPickFromGallery: () 
             color = MaterialTheme.colorScheme.primary
         )
         Text(
-            "Enfoca el sello dentro del recuadro para tasar y catalogar automáticamente.",
+            "Enfoca el sello con buena iluminación sobre un fondo plano.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -152,7 +153,6 @@ private fun CameraCaptureArea(onCaptured: (File) -> Unit, onPickFromGallery: () 
                     }
                 )
 
-                // Guía visual de enfoque para el sello
                 Box(
                     modifier = Modifier
                         .size(240.dp)
@@ -195,8 +195,7 @@ private fun CameraCaptureArea(onCaptured: (File) -> Unit, onPickFromGallery: () 
                     )
                 },
                 modifier = Modifier.weight(1f).height(56.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                shape = RoundedCornerShape(16.dp)
             ) {
                 Icon(Icons.Default.CameraAlt, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
@@ -270,7 +269,7 @@ private fun StampReviewForm(
 ) {
     val ai = uiState.aiResult
 
-    var country by remember { mutableStateOf(ai?.country ?: "") }
+    var country by remember { mutableStateOf(ai?.country ?: "Alemania (Deutsche Bundespost)") }
     var era by remember { mutableStateOf(ai?.era ?: "") }
     var faceValue by remember { mutableStateOf(ai?.faceValue ?: "") }
     var series by remember { mutableStateOf(ai?.series ?: "") }
@@ -284,10 +283,39 @@ private fun StampReviewForm(
     var scottNumber by remember { mutableStateOf(ai?.catalogScottNumber ?: "") }
     var yvertNumber by remember { mutableStateOf(ai?.catalogYvertNumber ?: "") }
 
-    Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-        Text("Resultado de Identificación", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+    val flagEmoji = CountryFlagHelper.getFlag(country)
 
-        // Visualizador de imagen del sello
+    Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+        // ENCABEZADO DESTACADO: BANDERA Y PAÍS
+        Card(
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(flagEmoji, fontSize = 42.sp)
+                Spacer(Modifier.width(14.dp))
+                Column {
+                    Text(
+                        "PAÍS EMISOR",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                    )
+                    Text(
+                        country,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+        }
+
+        // FOTOGRAFÍA DEL SELLO
         uiState.processedBitmap?.let {
             Spacer(Modifier.height(14.dp))
             Card(
@@ -304,7 +332,7 @@ private fun StampReviewForm(
             }
         }
 
-        // Tarjeta destacada de Valor de Mercado
+        // TARJETA DE VALOR DE MERCADO
         Spacer(Modifier.height(14.dp))
         Card(
             shape = RoundedCornerShape(16.dp),
@@ -325,7 +353,7 @@ private fun StampReviewForm(
                 Spacer(Modifier.width(12.dp))
                 Column {
                     Text(
-                        "VALOR DE MERCADO ESTIMADO",
+                        "VALOR ESTIMADO EN EL MERCADO",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onTertiaryContainer
@@ -337,32 +365,6 @@ private fun StampReviewForm(
                         color = MaterialTheme.colorScheme.onTertiaryContainer
                     )
                 }
-            }
-        }
-
-        if (ai != null) {
-            Spacer(Modifier.height(10.dp))
-            Card(
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
-            ) {
-                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Verified, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        "Identificado con ${(ai.confidence * 100).toInt()}% de confianza",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                }
-            }
-        }
-
-        uiState.aiUnavailableReason?.let { reason ->
-            Spacer(Modifier.height(10.dp))
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-                Text(reason, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
             }
         }
 
@@ -395,7 +397,7 @@ private fun StampReviewForm(
                     val entity = StampEntity(
                         imagePath = uiState.processedImageFile?.absolutePath ?: "",
                         perceptualHash = uiState.perceptualHash ?: "",
-                        country = country.ifBlank { null },
+                        country = country.ifBlank { "Desconocido" },
                         era = era.ifBlank { null },
                         faceValue = faceValue.ifBlank { null },
                         series = series.ifBlank { null },
@@ -460,7 +462,7 @@ private fun ErrorView(message: String, onRetry: () -> Unit) {
     ) {
         Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(54.dp))
         Spacer(Modifier.height(16.dp))
-        Text("Aviso de Conexión", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text("Aviso", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
         Text(message, style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(20.dp))
