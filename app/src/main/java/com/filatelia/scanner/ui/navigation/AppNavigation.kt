@@ -20,10 +20,12 @@ import com.filatelia.scanner.StampScannerApp
 import com.filatelia.scanner.ui.screens.CollectionScreen
 import com.filatelia.scanner.ui.screens.ScanScreen
 import com.filatelia.scanner.ui.screens.StampDetailScreen
+import com.filatelia.scanner.ui.screens.WelcomeScreen
 import com.filatelia.scanner.ui.viewmodel.CollectionViewModel
 import com.filatelia.scanner.ui.viewmodel.ScanViewModel
 import com.filatelia.scanner.ui.viewmodel.ViewModelFactory
 
+private const val ROUTE_WELCOME = "welcome"
 private const val ROUTE_SCAN = "scan"
 private const val ROUTE_COLLECTION = "collection"
 private const val ROUTE_DETAIL = "detail/{stampId}"
@@ -32,53 +34,70 @@ private const val ROUTE_DETAIL = "detail/{stampId}"
 fun AppNavigation(app: StampScannerApp) {
     val navController = rememberNavController()
     val factory = ViewModelFactory(app.stampRepository, app.aiRepository)
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentDestination = navBackStackEntry?.destination
+    val currentRoute = currentDestination?.route
+
+    // Ocultar la barra inferior en la portada de bienvenida
+    val showBottomBar = currentRoute != ROUTE_WELCOME && currentRoute?.startsWith("detail") == false
 
     Scaffold(
         bottomBar = {
-            val navBackStackEntry by navController.currentBackStackEntryAsState()
-            val currentDestination = navBackStackEntry?.destination
-
-            NavigationBar {
-                NavigationBarItem(
-                    selected = currentDestination?.hierarchy?.any { it.route == ROUTE_SCAN } == true,
-                    onClick = {
-                        navController.navigate(ROUTE_SCAN) {
-                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    },
-                    icon = { Icon(Icons.Default.CameraAlt, contentDescription = null) },
-                    label = { Text("Escanear") }
-                )
-                NavigationBarItem(
-                    selected = currentDestination?.hierarchy?.any { it.route == ROUTE_COLLECTION } == true,
-                    onClick = {
-                        navController.navigate(ROUTE_COLLECTION) {
-                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    },
-                    icon = { Icon(Icons.Default.Collections, contentDescription = null) },
-                    label = { Text("Colección") }
-                )
+            if (showBottomBar) {
+                NavigationBar {
+                    NavigationBarItem(
+                        selected = currentDestination?.hierarchy?.any { it.route == ROUTE_SCAN } == true,
+                        onClick = {
+                            navController.navigate(ROUTE_SCAN) {
+                                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        },
+                        icon = { Icon(Icons.Default.CameraAlt, contentDescription = null) },
+                        label = { Text("Escanear") }
+                    )
+                    NavigationBarItem(
+                        selected = currentDestination?.hierarchy?.any { it.route == ROUTE_COLLECTION } == true,
+                        onClick = {
+                            navController.navigate(ROUTE_COLLECTION) {
+                                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        },
+                        icon = { Icon(Icons.Default.Collections, contentDescription = null) },
+                        label = { Text("Colección") }
+                    )
+                }
             }
         }
     ) { padding ->
         NavHost(
             navController = navController,
-            startDestination = ROUTE_SCAN,
+            startDestination = ROUTE_WELCOME,
             modifier = Modifier.padding(padding)
         ) {
+            composable(ROUTE_WELCOME) {
+                WelcomeScreen(
+                    onStartClick = {
+                        navController.navigate(ROUTE_SCAN) {
+                            popUpTo(ROUTE_WELCOME) { inclusive = true }
+                        }
+                    }
+                )
+            }
             composable(ROUTE_SCAN) {
                 val scanViewModel: ScanViewModel = viewModel(factory = factory)
-                ScanScreen(viewModel = scanViewModel, onStampSaved = {
-                    navController.navigate(ROUTE_COLLECTION) {
-                        popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                        launchSingleTop = true
+                ScanScreen(
+                    viewModel = scanViewModel,
+                    onStampSaved = {
+                        navController.navigate(ROUTE_COLLECTION) {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                        }
                     }
-                })
+                )
             }
             composable(ROUTE_COLLECTION) {
                 val collectionViewModel: CollectionViewModel = viewModel(factory = factory)
