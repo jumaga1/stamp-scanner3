@@ -12,19 +12,25 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -75,9 +81,9 @@ fun ScanScreen(
                     PermissionMissingView { permissionLauncher.launch(Manifest.permission.CAMERA) }
                 }
             }
-            is ScanStep.Preprocessing -> StatusView("Procesando imagen (recorte, limpieza, normalización)...")
-            is ScanStep.CheckingDuplicates -> StatusView("Comparando contra tu colección...")
-            is ScanStep.RunningAi -> StatusView("Consultando IA para identificar el sello...")
+            is ScanStep.Preprocessing -> StatusView("Procesando imagen (recorte y normalización)...")
+            is ScanStep.CheckingDuplicates -> StatusView("Verificando duplicados en tu colección...")
+            is ScanStep.RunningAi -> StatusView("Analizando con IA de visión filatélica...")
             is ScanStep.DuplicateFound -> DuplicateWarningView(
                 confidence = step.result.confidence,
                 onContinueAnyway = { viewModel.continueDespiteDuplicate() },
@@ -100,92 +106,112 @@ private fun CameraCaptureArea(onCaptured: (File) -> Unit, onPickFromGallery: () 
     val imageCapture = remember { ImageCapture.Builder().build() }
 
     Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-        Text("Escanea un sello", style = MaterialTheme.typography.headlineSmall)
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "Coloca el sello sobre un fondo plano y con buena luz. Encuadra dejando un pequeño margen alrededor.",
-            style = MaterialTheme.typography.bodyMedium
-        )
-        Spacer(Modifier.height(12.dp))
-
-        AndroidView(
-            modifier = Modifier.fillMaxWidth().height(360.dp),
-            factory = { ctx ->
-                val previewView = PreviewView(ctx)
-                val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-                cameraProviderFuture.addListener({
-                    val cameraProvider = cameraProviderFuture.get()
-                    val preview = Preview.Builder().build().also {
-                        it.setSurfaceProvider(previewView.surfaceProvider)
-                    }
-                    try {
-                        cameraProvider.unbindAll()
-                        cameraProvider.bindToLifecycle(
-                            lifecycleOwner,
-                            CameraSelector.DEFAULT_BACK_CAMERA,
-                            preview,
-                            imageCapture
-                        )
-                    } catch (_: Exception) {
-                    }
-                }, ContextCompat.getMainExecutor(ctx))
-                previewView
-            }
-        )
-
-        Spacer(Modifier.height(16.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Button(onClick = {
-                val photoFile = createTempImageFile(context)
-                val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
-                imageCapture.takePicture(
-                    outputOptions,
-                    ContextCompat.getMainExecutor(context),
-                    object : ImageCapture.OnImageSavedCallback {
-                        override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                            onCaptured(photoFile)
-                        }
-                        override fun onError(exception: ImageCaptureException) {
-                        }
-                    }
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    "Escanear Sello Postal",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
                 )
-            }) {
-                Icon(Icons.Default.CameraAlt, contentDescription = null)
-                Spacer(Modifier.width(6.dp))
-                Text("Capturar")
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Centra el sello con buena iluminación sobre un fondo neutro.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
-            OutlinedButton(onClick = onPickFromGallery) {
-                Text("Elegir de galería / escáner")
+        }
+
+        Spacer(Modifier.height(14.dp))
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(380.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { ctx ->
+                    val previewView = PreviewView(ctx)
+                    val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+                    cameraProviderFuture.addListener({
+                        val cameraProvider = cameraProviderFuture.get()
+                        val preview = Preview.Builder().build().also {
+                            it.setSurfaceProvider(previewView.surfaceProvider)
+                        }
+                        try {
+                            cameraProvider.unbindAll()
+                            cameraProvider.bindToLifecycle(
+                                lifecycleOwner,
+                                CameraSelector.DEFAULT_BACK_CAMERA,
+                                preview,
+                                imageCapture
+                            )
+                        } catch (_: Exception) {}
+                    }, ContextCompat.getMainExecutor(ctx))
+                    previewView
+                }
+            )
+        }
+
+        Spacer(Modifier.height(18.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Button(
+                onClick = {
+                    val photoFile = createTempImageFile(context)
+                    val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
+                    imageCapture.takePicture(
+                        outputOptions,
+                        ContextCompat.getMainExecutor(context),
+                        object : ImageCapture.OnImageSavedCallback {
+                            override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                                onCaptured(photoFile)
+                            }
+                            override fun onError(exception: ImageCaptureException) {}
+                        }
+                    )
+                },
+                modifier = Modifier.weight(1f).height(50.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(Icons.Default.CameraAlt, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Capturar", fontWeight = FontWeight.SemiBold)
+            }
+
+            OutlinedButton(
+                onClick = onPickFromGallery,
+                modifier = Modifier.height(50.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(Icons.Default.PhotoLibrary, contentDescription = null)
             }
         }
     }
 }
 
 @Composable
-private fun PermissionMissingView(onRequest: () -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Icon(Icons.Default.Warning, contentDescription = null)
-        Spacer(Modifier.height(8.dp))
-        Text("Se necesita permiso de cámara para escanear sellos.")
-        Spacer(Modifier.height(12.dp))
-        Button(onClick = onRequest) { Text("Conceder permiso") }
-    }
-}
-
-@Composable
 private fun StatusView(message: String) {
     Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
+        modifier = Modifier.fillMaxSize().padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        CircularProgressIndicator()
-        Spacer(Modifier.height(16.dp))
-        Text(message, style = MaterialTheme.typography.bodyLarge)
+        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, strokeWidth = 4.dp)
+        Spacer(Modifier.height(20.dp))
+        Text(message, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -195,38 +221,31 @@ private fun DuplicateWarningView(
     onContinueAnyway: () -> Unit,
     onCancel: () -> Unit
 ) {
-    Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
-        Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary)
-        Spacer(Modifier.height(12.dp))
-        Text("Posible sello duplicado", style = MaterialTheme.typography.headlineSmall)
-        Spacer(Modifier.height(8.dp))
-        val message = when (confidence) {
-            DuplicateConfidence.CASI_SEGURO -> "Este sello parece ser idéntico (imagen y datos) a uno que ya tienes en tu colección."
-            DuplicateConfidence.PROBABLE -> "La imagen es muy similar a un sello que ya tienes registrado."
-            DuplicateConfidence.POSIBLE -> "Encontramos un sello con datos parecidos en tu colección. Podría ser el mismo."
-            DuplicateConfidence.NINGUNO -> ""
-        }
-        Text(message, style = MaterialTheme.typography.bodyMedium)
-        Spacer(Modifier.height(20.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = onCancel) { Text("Cancelar") }
-            Button(onClick = onContinueAnyway) { Text("Es distinto, continuar") }
-        }
-    }
-}
-
-@Composable
-private fun ErrorView(message: String, onRetry: () -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(16.dp),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
-        Text("Ocurrió un error", style = MaterialTheme.typography.headlineSmall)
-        Spacer(Modifier.height(8.dp))
-        Text(message, style = MaterialTheme.typography.bodyMedium)
-        Spacer(Modifier.height(16.dp))
-        Button(onClick = onRetry) { Text("Reintentar") }
+        Column(modifier = Modifier.padding(20.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary)
+                Spacer(Modifier.width(8.dp))
+                Text("¡Posible Sello Duplicado!", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.height(10.dp))
+            val message = when (confidence) {
+                DuplicateConfidence.CASI_SEGURO -> "Este sello es idéntico a uno ya existente en tu colección."
+                DuplicateConfidence.PROBABLE -> "La imagen tiene alta coincidencia con otro de tus sellos guardados."
+                DuplicateConfidence.POSIBLE -> "Existe un sello con datos similares registrados previamente."
+                DuplicateConfidence.NINGUNO -> ""
+            }
+            Text(message, style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.height(20.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) { Text("Descartar") }
+                Button(onClick = onContinueAnyway, modifier = Modifier.weight(1f)) { Text("Continuar") }
+            }
+        }
     }
 }
 
@@ -247,77 +266,96 @@ private fun StampReviewForm(
     var issueYear by remember { mutableStateOf(ai?.issueYearEstimate?.toString() ?: "") }
     var motif by remember { mutableStateOf(ai?.motif ?: "") }
     var historicalNote by remember { mutableStateOf(ai?.historicalNote ?: "") }
-    var scottNumber by remember { mutableStateOf("") }
-    var michelNumber by remember { mutableStateOf("") }
-    var yvertNumber by remember { mutableStateOf("") }
+    var michelNumber by remember { mutableStateOf(ai?.catalogMichelNumber ?: "") }
+    var scottNumber by remember { mutableStateOf(ai?.catalogScottNumber ?: "") }
+    var yvertNumber by remember { mutableStateOf(ai?.catalogYvertNumber ?: "") }
 
     Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-        Text("Ficha del sello", style = MaterialTheme.typography.headlineSmall)
+        Text("Ficha del Sello Identificado", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
 
         uiState.processedBitmap?.let {
             Spacer(Modifier.height(12.dp))
-            Image(
-                bitmap = it.asImageBitmap(),
-                contentDescription = "Sello escaneado",
-                modifier = Modifier.fillMaxWidth().height(220.dp)
-            )
-        }
-
-        uiState.aiUnavailableReason?.let { reason ->
-            Spacer(Modifier.height(8.dp))
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-                Text(reason, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+            ) {
+                Image(
+                    bitmap = it.asImageBitmap(),
+                    contentDescription = "Sello escaneado",
+                    modifier = Modifier.fillMaxWidth().height(240.dp)
+                )
             }
         }
+
         ai?.let {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Sugerido por IA (confianza ${(it.confidence * 100).toInt()}%) — revisa y corrige antes de guardar.",
-                style = MaterialTheme.typography.labelMedium
-            )
+            Spacer(Modifier.height(12.dp))
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "Identificado por IA (Certeza: ${(it.confidence * 100).toInt()}%)",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
         }
 
-        Spacer(Modifier.height(12.dp))
-        LabeledField("País", country) { country = it }
-        LabeledField("Época (ej. 1950-1959)", era) { era = it }
+        Spacer(Modifier.height(16.dp))
+        Text("Información Básica", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        LabeledField("País / Entidad emisora (ej. Alemania, RDA)", country) { country = it }
         LabeledField("Año de emisión", issueYear) { issueYear = it }
-        LabeledField("Valor nominal", faceValue) { faceValue = it }
-        LabeledField("Serie", series) { series = it }
+        LabeledField("Valor facial (ej. 40 Pf)", faceValue) { faceValue = it }
+        LabeledField("Época histórica", era) { era = it }
+        LabeledField("Serie o emisión", series) { series = it }
+        LabeledField("Diseño / Motivo ilustrado", motif) { motif = it }
         LabeledField("Estado de conservación", condition) { condition = it }
-        LabeledField("Rareza", rarity) { rarity = it }
-        LabeledField("Motivo / diseño", motif) { motif = it }
-        LabeledField("Nota histórica", historicalNote) { historicalNote = it }
-        Spacer(Modifier.height(8.dp))
-        Text("Números de catálogo (opcional, verifica en la fuente oficial)", style = MaterialTheme.typography.labelLarge)
-        LabeledField("N° catálogo Scott", scottNumber) { scottNumber = it }
-        LabeledField("N° catálogo Michel", michelNumber) { michelNumber = it }
-        LabeledField("N° catálogo Yvert", yvertNumber) { yvertNumber = it }
+
+        Spacer(Modifier.height(12.dp))
+        Text("Catálogos Filatélicos", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        LabeledField("Nº Catálogo Michel (ej. MiNr. 814)", michelNumber) { michelNumber = it }
+        LabeledField("Nº Catálogo Scott", scottNumber) { scottNumber = it }
+        LabeledField("Nº Catálogo Yvert", yvertNumber) { yvertNumber = it }
 
         Spacer(Modifier.height(20.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = onDiscard) { Text("Descartar") }
-            Button(onClick = {
-                val entity = StampEntity(
-                    imagePath = uiState.processedImageFile?.absolutePath ?: "",
-                    perceptualHash = uiState.perceptualHash ?: "",
-                    country = country.ifBlank { null },
-                    era = era.ifBlank { null },
-                    faceValue = faceValue.ifBlank { null },
-                    series = series.ifBlank { null },
-                    condition = condition.ifBlank { null },
-                    rarity = rarity.ifBlank { null },
-                    issueYear = issueYear.toIntOrNull(),
-                    motif = motif.ifBlank { null },
-                    historicalNote = historicalNote.ifBlank { null },
-                    catalogScottNumber = scottNumber.ifBlank { null },
-                    catalogMichelNumber = michelNumber.ifBlank { null },
-                    catalogYvertNumber = yvertNumber.ifBlank { null },
-                    aiSuggested = ai != null,
-                    aiConfidence = ai?.confidence
-                )
-                onSave(entity)
-            }) { Text("Guardar en mi colección") }
+            OutlinedButton(onClick = onDiscard, modifier = Modifier.weight(1f).height(48.dp)) {
+                Text("Descartar")
+            }
+            Button(
+                onClick = {
+                    val entity = StampEntity(
+                        imagePath = uiState.processedImageFile?.absolutePath ?: "",
+                        perceptualHash = uiState.perceptualHash ?: "",
+                        country = country.ifBlank { null },
+                        era = era.ifBlank { null },
+                        faceValue = faceValue.ifBlank { null },
+                        series = series.ifBlank { null },
+                        condition = condition.ifBlank { null },
+                        rarity = rarity.ifBlank { null },
+                        issueYear = issueYear.toIntOrNull(),
+                        motif = motif.ifBlank { null },
+                        historicalNote = historicalNote.ifBlank { null },
+                        catalogScottNumber = scottNumber.ifBlank { null },
+                        catalogMichelNumber = michelNumber.ifBlank { null },
+                        catalogYvertNumber = yvertNumber.ifBlank { null },
+                        aiSuggested = ai != null,
+                        aiConfidence = ai?.confidence
+                    )
+                    onSave(entity)
+                },
+                modifier = Modifier.weight(1f).height(48.dp),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Text("Guardar Sello")
+            }
         }
+        Spacer(Modifier.height(24.dp))
     }
 }
 
@@ -327,8 +365,39 @@ private fun LabeledField(label: String, value: String, onChange: (String) -> Uni
         value = value,
         onValueChange = onChange,
         label = { Text(label) },
+        shape = RoundedCornerShape(10.dp),
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
     )
+}
+
+@Composable
+private fun PermissionMissingView(onRequest: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+        Spacer(Modifier.height(10.dp))
+        Text("Permiso de cámara necesario", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(12.dp))
+        Button(onClick = onRequest) { Text("Conceder permiso") }
+    }
+}
+
+@Composable
+private fun ErrorView(message: String, onRetry: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text("Aviso", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(8.dp))
+        Text(message, style = MaterialTheme.typography.bodyMedium)
+        Spacer(Modifier.height(16.dp))
+        Button(onClick = onRetry) { Text("Reintentar") }
+    }
 }
 
 private fun createTempImageFile(context: android.content.Context): File {
